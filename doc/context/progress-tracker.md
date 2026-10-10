@@ -51,7 +51,7 @@
 - `architecture.md` 以 SRS 为主改造：抬头上游改为 SRS，`project-overview.md` 标注为"背景与取舍记录（已降级，不再是规则真源）"；"成功标准 3/4/5"与"核心流程 §1/§9/§10"的引用全部改指 SRS（§9.1 第 1~3 条、§1.4/§4.1.1、§5.2 #10、§8.2 FR-PUBLIC）；脚本状态由"必须重跑"改为"已暂停使用"
 - 清掉两处**指向不存在内容**的引用：`architecture.md` 原称"JWT 存 localStorage 方案 `project-overview.md` 已否决"（该文档全文无此内容），改为本文自己的取舍；原称"五组运行结果的完整表见 `progress-tracker.md` 同名小节"（无此小节），已删
 - 清掉 README 引用（`project-overview.md` §10.4 与本文件 Completed 各一处）——仓库内从来没有 README，该引用一直是空指针
-- 新增 `doc/context/git-standards.md`（v1.0）：按 **Conventional Commits 1.0.0** 落成本仓库的提交信息、分支与历史改写规范，含类型/范围取值表、破坏性变更与 `revert` 写法、`commit-msg` 钩子方案，以及本仓库已发生的 4 类违规实例（缺类型前缀、冒号后缺空格、提交信息带 BOM、`Revert "..."`）
+- 新增 `doc/context/git-standards.md`（现 v1.1，精简版）：按 **Conventional Commits 1.0.0** 列出提交信息格式与规则、类型/范围取值表、提交粒度与分支、`revert` 与历史改写、换行符、`commit-msg` 钩子方案。**历史提交中有 3 条不符合该规范（未改写）**
 
 ## In Progress
 
