@@ -51,6 +51,7 @@
 - `architecture.md` 以 SRS 为主改造：抬头上游改为 SRS，`project-overview.md` 标注为"背景与取舍记录（已降级，不再是规则真源）"；"成功标准 3/4/5"与"核心流程 §1/§9/§10"的引用全部改指 SRS（§9.1 第 1~3 条、§1.4/§4.1.1、§5.2 #10、§8.2 FR-PUBLIC）；脚本状态由"必须重跑"改为"已暂停使用"
 - 清掉两处**指向不存在内容**的引用：`architecture.md` 原称"JWT 存 localStorage 方案 `project-overview.md` 已否决"（该文档全文无此内容），改为本文自己的取舍；原称"五组运行结果的完整表见 `progress-tracker.md` 同名小节"（无此小节），已删
 - 清掉 README 引用（`project-overview.md` §10.4 与本文件 Completed 各一处）——仓库内从来没有 README，该引用一直是空指针
+- 新增 `doc/context/git-standards.md`（v1.0）：按 **Conventional Commits 1.0.0** 落成本仓库的提交信息、分支与历史改写规范，含类型/范围取值表、破坏性变更与 `revert` 写法、`commit-msg` 钩子方案，以及本仓库已发生的 4 类违规实例（缺类型前缀、冒号后缺空格、提交信息带 BOM、`Revert "..."`）
 
 ## In Progress
 
@@ -58,8 +59,8 @@
 
 ## Next Up
 
-1. 定下并执行 `project-overview.md` 的定位 —— **当前唯一卡点**
-2. 补 `doc/context/ui-context.md`、`code-standards.md`、`ai-workflow-rules.md` —— CLAUDE.md 要求动手前依次读这 3 个，它们至今不存在
+1. 解除 `CMS-SRS.md` 抬头的"导出文档（只读）"与"唯一事实来源为 project-overview.md"两句 —— 定位问题已拍板（①），**只剩这一句**（见 In Progress）
+2. 补 `doc/context/ui-context.md`、`code-standards.md`、`ai-workflow-rules.md` —— CLAUDE.md 要求动手前依次读这 3 个，它们至今不存在（`git-standards.md` 已于 2026-10-10 建好，但 CLAUDE.md 的清单里也没有它）
 3. 各数据库表的字段级定义 —— 2026-09-28 删除数据库设计文档后无处可查，目前只有 `audit_log` 的操作人列寄存在 architecture §4.1
 4. 接口清单与字段级签名（REST 路径、请求响应字段、错误码、分页排序、幂等语义）
 5. 非功能需求（性能、并发、可用性、日志监控、定时扫描间隔与失败重试）
@@ -73,7 +74,7 @@
 | 2 | SRS 里**没有**的两块内容怎么处置：**12 步端到端核心流程**、**11 条成功标准（"什么情况算完成"）**——目前只存在于 `project-overview.md` | **仍未处置**。① 定下后 `architecture.md` 已不再引用这两块（改指 SRS §9.1 第 1~3 条与 §1.4/§4.1.1、§8.2），但它们是否并进 SRS 本身仍待定 |
 | 3 | 账号来源、密码找回/邮件验证、归属编辑离职后文章改派 | 账号域 3 项，**整体搁置**（2026-09-28 起） |
 | 4 | `user` 表是否保留 `email` 字段 | 随 #3 定稿；`MailSender` 删除后邮箱已失去用途 |
-| 5 | `.claude/claude.md` 里的清单仍指向旧 `context/` 路径，且列了 3 个不存在的文件 | **需手工更正**（受保护目录，会话内无权修改） |
+| 5 | `.claude/claude.md` 里的清单仍指向旧 `context/` 路径，且列了 3 个不存在的文件、又缺 `git-standards.md` | **需手工更正**（受保护目录，会话内无权修改） |
 | 6 | 追溯脚本停用 ⇒ 文档之间再没有自动发现漂移的手段 | 已知代价，用户明示"先不用" |
 | 7 | 留痕表里的「改期」是否需要留痕 | 这是推断后补上的（它改变了文章对外可见的时间点），基线已标注待复核，用户尚未明确确认 |
 
@@ -141,7 +142,7 @@
 - 本文件**不记提交号**：本仓库历史会被变基／改写（2026-10-10 一次 `amend` 就把已写下的哈希作废了），哈希留不住，记了反而变成悬空引用。
 - 历史里那条 `Revert "create project"` 是事故残留，**不是有人故意清空项目**。
 
-**文件清单**（共 6 个）：`CMS-SRS.md`（根目录，对外交付）；`doc/context/` 下 3 份（project-overview / architecture / progress-tracker）；`doc/design/traceability-check.py`（已暂停使用）；`doc/reference/chatgpt-srs-conversation.md`（**缺失**）。
+**文件清单**（共 7 个）：`CMS-SRS.md`（根目录，**唯一主文档**）；`doc/context/` 下 4 份（project-overview / architecture / progress-tracker / git-standards）；`doc/design/traceability-check.py`（已暂停使用）；`doc/reference/chatgpt-srs-conversation.md`（**缺失**）。
 已删除、不要再引用：`doc/requirements/*.md`、`doc/design/database-design.md`。
 
 **仍未恢复**：`doc/reference/chatgpt-srs-conversation.md`（需求原始输入归档，18 轮）。多个文档仍引用它，但它从未出现在任何一次提交历史里。它是"这条规则当初为什么这么定"的最终依据——缺了它，后续任何规则复核都只能靠现有文档自证，而现有文档自证恰恰是今天两处缺口得以长期存在的条件。**用户已表示暂不处理。**
