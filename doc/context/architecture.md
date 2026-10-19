@@ -323,10 +323,13 @@ web/
 
 | 事项 | 做法 |
 |---|---|
-| 会话 | 服务端 `HttpSession`，Cookie 名 `JSESSIONID`，`httpOnly` = true，`SameSite` = Lax，生产环境 `Secure` = true |
+| 会话 | 服务端 `HttpSession`，Cookie 名 `JSESSIONID`，`httpOnly` = true，`SameSite` = Lax，`Path` = /，`Max-Age` 与会话绝对有效期一致，生产环境 `Secure` = true |
 | CSRF | `CookieCsrfTokenRepository`：服务端下发 `XSRF-TOKEN` cookie，前端 Axios 读取后回填到 `X-XSRF-TOKEN` 请求头 |
 | 密码 | BCrypt 哈希，强度用框架默认 |
 | 会话固定攻击 | 框架默认在认证成功后更换 session id |
+| 会话有效期 | 空闲 30 分钟无操作失效；绝对有效期 12 小时；到期后请求返回 401，须重新登录（SRS 4.1.2） |
+| 登录失败限制 | 同一登录名连续失败 5 次锁定 15 分钟；锁定期间即使密码正确也拒绝，响应与普通失败一致（SRS 4.1.2） |
+| 并发会话 | 同一账号允许多个会话同时存在；登出只销毁当前会话（SRS 4.1.2） |
 | 登录 | `POST /api/auth/login` |
 | 登出 | `POST /api/auth/logout`，会话失效 |
 | 注册 | `POST /api/auth/register`，**只创建编辑角色**，注册成功即启用（SRS §4.1.1、FR-USER-001） |
@@ -345,11 +348,11 @@ web/
 |---|---|---|---|
 | 角色闸 | 你的角色允许这个动作吗 | 当前用户 `role` + 目标动作 | 404 |
 | 归属闸 | 这条数据是你的吗 | `article.author_id` vs 当前用户 | 404 |
-| 状态闸 | 当前状态允许这个动作吗 | `article.status` + 目标迁移 | 404 |
+| 状态闸 | 当前状态允许这个动作吗 | `article.status` + 目标迁移 | 409 |
 
-**所有闸门失败的响应与"资源不存在"逐字节一致（404）。** 若角色闸返回 403、归属闸返回 404，攻击者仅凭状态码就能分辨"这篇文章存在但不是你的"，等于泄露资源存在性。
+**角色闸与归属闸失败一律返回 404，响应与"资源不存在"逐字节一致；状态闸失败返回 409。** 若角色闸返回 403、归属闸返回 404，攻击者仅凭状态码就能分辨"这篇文章存在但不是你的"，等于泄露资源存在性；能走到状态闸说明前两闸已过、请求者对该资源的可见性本来确定，因此 409 不泄露新信息（SRS §4.4）。
 
-**401 与 404 可以并存，不矛盾：** 401 只发生在"你根本没登录"这一种情况，它不携带任何关于目标资源的信息，攻击者从自己的登录态本来就知道自己没登录。因此**未认证 = 401，已认证但闸门失败 = 404**。
+**401 与 404 可以并存，不矛盾：** 401 只发生在"你根本没登录"这一种情况，它不携带任何关于目标资源的信息，攻击者从自己的登录态本来就知道自己没登录。因此**未认证 = 401，已认证但角色闸／归属闸失败 = 404，状态闸失败 = 409**。
 
 三道闸门全部实现在 `security/` 包内的一个 `AuthzInterceptor` 里。这是刻意的：本项目对外演示的核心就是这套权限模型，把判定拆散到注解、Service 与框架配置三处，会让"权限判断只有一处"这个可证明性根基消失。
 
@@ -423,9 +426,9 @@ BR-ISO-003 要求隔离"在数据层强制执行，漏一处即漏洞"。落地�
 实现使用 MySQL 8 的窗口函数，配合 `audit_log` 上的索引 `(article_id, action, created_at DESC)`：
 
 ```sql
-SELECT article_id, action, reason, created_at
+SELECT article_id, action, reason, category, actor_type, actor_id, created_at
 FROM (
-  SELECT article_id, action, reason, created_at,
+  SELECT article_id, action, reason, category, actor_type, actor_id, created_at,
          ROW_NUMBER() OVER (PARTITION BY article_id ORDER BY created_at DESC, id DESC) AS rn
   FROM audit_log
   WHERE action IN ('驳回', '下架')
@@ -434,10 +437,11 @@ FROM (
 WHERE t.rn = 1
 ```
 
-两点必须注意：
+三点必须注意：
 
 1. 子查询的 `article_id IN (...)` 用的是**已经过归属过滤、已经分页**的文章 id 列表，而不是全量。顺序反了就会通过"返回了不属于我的文章的原因"泄露内容，与 BR-SEARCH-003 的同类风险一致。
 2. 这是一次额外查询（主查询 + 留痕查询，共 2 次），不是 N+1。
+3. 列表还要展示操作人与驳回类别（SRS §7.2（3）），因此查询须带 `actor_type`／`actor_id` 与 `category`，并按需关联账号名；只取原因与时间会漏字段。
 
 ---
 
