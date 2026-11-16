@@ -60,6 +60,7 @@ replay_pid*.log
 web/node_modules/
 web/dist/
 web/.vite/
+web/.env*.local
 
 ### Windows ###
 Thumbs.db
