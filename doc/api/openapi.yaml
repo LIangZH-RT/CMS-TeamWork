@@ -39,7 +39,7 @@ paths:
       tags:
       - AUTH
       summary: 获取 CSRF 令牌【补充】
-      description: '下发 XSRF-TOKEN Cookie 并在响应体返回。
+      description: '在响应体返回会话绑定的 CSRF 令牌（HttpSessionCsrfTokenRepository）；不下发可读的 CSRF Cookie。登录、登出后需重新获取。
 
 
         覆盖需求：§4.1.2、FR-AUTH-003'
@@ -103,7 +103,7 @@ paths:
       tags:
       - AUTH
       summary: 登录
-      description: '成功后更换会话标识并下发 JSESSIONID（HttpOnly; SameSite=Lax; Path=/）。不需要 CSRF。连续 5 次失败锁定 15 分钟；失败与锁定响应一致（40101）。
+      description: '成功后更换会话标识并下发 JSESSIONID（HttpOnly; SameSite=Lax; Path=/），登录前的 CSRF 令牌随之失效。不需要 CSRF。连续 5 次失败锁定 15 分钟；失败与锁定响应一致（40101）。
 
 
         覆盖需求：FR-AUTH-001、FR-AUTH-003、§4.1.2'
@@ -283,6 +283,37 @@ paths:
           $ref: '#/components/responses/CsrfInvalid'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/articles/counts:
+    get:
+      tags:
+      - ARTICLE
+      summary: 按状态计数【补充】
+      description: '与文章列表同一套归属过滤：编辑只统计本人，管理员统计全部；6 种状态都返回，无文章为 0。不返回 404。
+
+
+        覆盖需求：FR-ARTICLE-003、FR-ARTICLE-006、BR-SEARCH-002、BR-SEARCH-003、X-ISO-03、X-ISO-04'
+      operationId: countArticlesByStatus
+      parameters:
+      - $ref: '#/components/parameters/CategoryFilter'
+      - $ref: '#/components/parameters/TagIdsFilter'
+      - $ref: '#/components/parameters/TitleFilter'
+      - $ref: '#/components/parameters/AuthorFilter'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/StatusCounts'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
   /api/articles/{id}:
     parameters:
     - $ref: '#/components/parameters/ArticleId'
@@ -1127,10 +1158,10 @@ paths:
       tags:
       - PUBLIC
       summary: 已发布文章列表
-      description: '仅返回已发布文章的白名单字段；未知参数（如 status）忽略。按 published_at 降序。
+      description: '仅返回已发布文章的白名单字段；未知参数（如 status）忽略。按 published_at 降序。可按关键字 q 匹配标题或摘要（范围延伸）。with_facets=true 时附带全部已发布文章引用的分类与标签（不受筛选影响）。
 
 
-        覆盖需求：FR-PUBLIC-001、BR-ISO-004、BR-SEARCH-005'
+        覆盖需求：FR-PUBLIC-001、BR-ISO-004、BR-SEARCH-005、BR-TAX-003'
       security: []
       operationId: listPublicArticles
       parameters:
@@ -1138,6 +1169,18 @@ paths:
       - $ref: '#/components/parameters/PageSize'
       - $ref: '#/components/parameters/CategoryFilter'
       - $ref: '#/components/parameters/TagIdsFilter'
+      - name: q
+        in: query
+        schema:
+          type: string
+          maxLength: 100
+        description: 【补充·范围延伸】关键字：去首尾空白后匹配标题或摘要（LIKE 子串，\ % _ 按字面转义）；不匹配正文；空串视为未传
+      - name: with_facets
+        in: query
+        schema:
+          type: boolean
+          default: false
+        description: 【补充】为 true 时返回 data.facets
       responses:
         '200':
           description: 成功
@@ -1149,16 +1192,7 @@ paths:
                 - type: object
                   properties:
                     data:
-                      allOf:
-                      - $ref: '#/components/schemas/PageMeta'
-                      - type: object
-                        required:
-                        - items
-                        properties:
-                          items:
-                            type: array
-                            items:
-                              $ref: '#/components/schemas/PublicArticleListItem'
+                      $ref: '#/components/schemas/PublicArticlePage'
         '400':
           $ref: '#/components/responses/BadRequest'
   /api/public/articles/{id}:
@@ -1199,7 +1233,7 @@ components:
       type: apiKey
       in: header
       name: X-XSRF-TOKEN
-      description: CSRF 令牌，取自 XSRF-TOKEN Cookie 或 GET /api/auth/csrf
+      description: CSRF 令牌，只能通过 GET /api/auth/csrf 的响应体获取（会话绑定）
   parameters:
     ArticleId:
       name: id
@@ -1774,7 +1808,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ArticleAction'
-          description: 【补充】
+          description: 【补充】当前请求者在当前状态下可执行的动作，仅作界面提示（口径见 api-spec §4.1）
     ArticleListItem:
       type: object
       required:
@@ -1789,6 +1823,7 @@ components:
       - scheduled_publish_time
       - published_at
       - latest_event
+      - allowed_actions
       properties:
         id:
           type: integer
@@ -1822,6 +1857,11 @@ components:
           nullable: true
         latest_event:
           $ref: '#/components/schemas/LatestEvent'
+        allowed_actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArticleAction'
+          description: 【补充】当前请求者在当前状态下可执行的动作，仅作界面提示（口径见 api-spec §4.1）
     ArticleCreateRequest:
       type: object
       required:
@@ -2081,6 +2121,50 @@ components:
           type: integer
           format: int64
           nullable: true
+    StatusCounts:
+      type: object
+      required:
+      - by_status
+      - total
+      properties:
+        by_status:
+          type: object
+          required:
+          - DRAFT
+          - PENDING_REVIEW
+          - REJECTED
+          - SCHEDULED
+          - PUBLISHED
+          - UNPUBLISHED
+          properties:
+            DRAFT:
+              type: integer
+              format: int64
+              minimum: 0
+            PENDING_REVIEW:
+              type: integer
+              format: int64
+              minimum: 0
+            REJECTED:
+              type: integer
+              format: int64
+              minimum: 0
+            SCHEDULED:
+              type: integer
+              format: int64
+              minimum: 0
+            PUBLISHED:
+              type: integer
+              format: int64
+              minimum: 0
+            UNPUBLISHED:
+              type: integer
+              format: int64
+              minimum: 0
+        total:
+          type: integer
+          format: int64
+          minimum: 0
     CredentialsRequest:
       type: object
       required:
@@ -2143,6 +2227,39 @@ components:
         published_at:
           type: string
           format: date-time
+    PublicFacets:
+      type: object
+      nullable: true
+      required:
+      - categories
+      - tags
+      description: 【补充】全部已发布文章引用的分类与标签，按 id 升序；与本次筛选、分页无关
+      properties:
+        categories:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaxonomyBrief'
+        tags:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaxonomyBrief'
+    PublicArticlePage:
+      allOf:
+      - $ref: '#/components/schemas/PageMeta'
+      - type: object
+        required:
+        - items
+        - facets
+        properties:
+          items:
+            type: array
+            items:
+              $ref: '#/components/schemas/PublicArticleListItem'
+          facets:
+            allOf:
+            - $ref: '#/components/schemas/PublicFacets'
+            nullable: true
+            description: with_facets=true 时返回，否则为 null
     PublicArticleDetail:
       allOf:
       - $ref: '#/components/schemas/PublicArticleListItem'
