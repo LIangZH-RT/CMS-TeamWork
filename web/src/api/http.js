@@ -1,7 +1,9 @@
 // 全前端共用的 Axios 实例（F / G 复用，不要各自再建）。
 // - baseURL 为空：只请求同源 /api/**（开发走 Vite 代理或契约 mock，部署走 Nginx）
 // - withCredentials：携带会话 Cookie（JSESSIONID）
-// - 写请求的 X-XSRF-TOKEN 由 F 按 api-spec §2.2 接入；公开页只读，不需要 CSRF
+// - CSRF（api-spec §2.2）：令牌与会话绑定，只从 GET /api/auth/csrf 的响应体下发，不写 Cookie。
+//   因此这里关闭 axios 默认的「读 XSRF-TOKEN Cookie 填请求头」；写请求的 X-XSRF-TOKEN 由 F 接入认证时
+//   以请求拦截器从内存取令牌填入（登录 / 登出后重取，403 时重取并对幂等请求重试一次）。公开页只读，不需要 CSRF
 // - 统一解包 {code, message, data}：成功返回 data；失败抛 ApiError。message 只给人看，不做分支（§1.4）
 // - 字段保持 snake_case，不做驼峰转换
 import axios from 'axios'
@@ -42,8 +44,8 @@ export const http = axios.create({
   baseURL: '',
   withCredentials: true,
   timeout: 15000,
-  xsrfCookieName: 'XSRF-TOKEN',
-  xsrfHeaderName: 'X-XSRF-TOKEN',
+  withXSRFToken: false,
+  xsrfCookieName: null,
   // 数组参数按 OpenAPI form + explode 序列化：tag_ids=1&tag_ids=2（不是 tag_ids[]=1）
   paramsSerializer: { indexes: null },
 })
