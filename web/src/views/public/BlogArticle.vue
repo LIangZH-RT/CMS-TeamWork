@@ -7,13 +7,11 @@ import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { getPublicArticle } from '@/api/public'
 import { isNotFound } from '@/api/http'
-import { useSeenTaxonomy } from '@/stores/seenTaxonomy'
 import { fmtDateTime, fmtOffset } from '@/utils/format'
 import MarkdownView from '@/components/MarkdownView.vue'
 import NotFound from './NotFound.vue'
 
 const route = useRoute()
-const seen = useSeenTaxonomy()
 const ID_RE = /^[1-9]\d{0,18}$/
 
 const state = ref('loading') // loading | ready | notfound | error
@@ -35,7 +33,6 @@ async function load(id) {
   try {
     const a = await getPublicArticle(id)
     if (my !== seq) return
-    seen.remember([a])
     article.value = a
     state.value = 'ready'
     document.title = `${a.title} · TeamWork 技术博客`
@@ -51,7 +48,7 @@ watch(
   { immediate: true },
 )
 
-const catLink = computed(() => article.value?.category && { name: 'blog-home', query: { category_id: String(article.value.category.id) } })
+const catLink = computed(() => article.value?.category && { name: 'blog-category', params: { id: String(article.value.category.id) } })
 const tagLink = (t) => ({ name: 'blog-home', query: { tag_ids: [String(t.id)] } })
 </script>
 

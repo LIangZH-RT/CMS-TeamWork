@@ -1,6 +1,9 @@
-// 首页筛选状态与 URL 互转：page、category_id、tag_ids（多值，交集语义，BR-SEARCH-005）。
+// 列表筛选状态与 URL 互转：page、category_id、tag_ids（多值，交集语义，BR-SEARCH-005）。
+// 分类页把分类放在路径 /category/:id 里；首页 query 里的 category_id 只用于兼容旧链接（重定向到分类页）。
 // ID 一律保留为十进制字符串，避免 int64 精度问题。
 const ID_RE = /^[1-9]\d{0,18}$/
+
+export const isId = (v) => typeof v === 'string' && ID_RE.test(v)
 
 const asArray = (v) => (v == null ? [] : Array.isArray(v) ? v : [v])
 

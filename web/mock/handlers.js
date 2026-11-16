@@ -1,6 +1,6 @@
 // 契约 mock：按 api-spec §1.4 / §1.5 / §3.2 / §10.2 / §11 实现三个公开出口。
-// 只覆盖博客前台用到的 GET /api/public/articles、GET /api/public/articles/{id}、GET /api/media/{id}；
-// 其他 /api/** 一律返回统一 404 体（本 mock 不模拟后台接口，也不存在公开分类 / 标签接口）。
+// 只覆盖博客前台用到的 GET /api/public/articles（含 with_facets）、GET /api/public/articles/{id}、GET /api/media/{id}；
+// 其他 /api/** 一律返回统一 404 体（本 mock 不模拟后台接口；分类 / 标签导航走 facets，没有单独的公开接口）。
 import { articles, categories, tags, media } from './db.js'
 import { makeCoverPng, makeDiagramPng, makeWav } from './assets.js'
 
@@ -51,6 +51,17 @@ function intParam(sp, name, { def, min, max }) {
   return { value: n }
 }
 
+/** §4.14 PublicFacets：全部已发布文章当前引用的分类、标签，按 id 升序；与本次筛选、分页无关 */
+export function publicFacets() {
+  const rows = published()
+  const catIds = [...new Set(rows.map((a) => a.category_id))].sort((x, y) => x - y)
+  const tagIds = [...new Set(rows.flatMap((a) => a.tag_ids))].sort((x, y) => x - y)
+  return {
+    categories: catIds.map((id) => ({ id, name: catById.get(id).name })),
+    tags: tagIds.map((id) => ({ id, name: tagById.get(id).name })),
+  }
+}
+
 /** GET /api/public/articles：只给已发布；未知参数（status、author_id…）忽略；tag_ids 交集 */
 export function listPublished(sp) {
   const page = intParam(sp, 'page', { def: 1, min: 1 })
@@ -61,6 +72,8 @@ export function listPublished(sp) {
   if (cat !== null && cat !== '' && !ID_RE.test(cat)) return badRequest('category_id', '必须是正整数')
   const tagIds = sp.getAll('tag_ids').filter((v) => v !== '')
   if (tagIds.some((v) => !ID_RE.test(v))) return badRequest('tag_ids', '必须是正整数')
+  const wf = sp.get('with_facets')
+  if (wf !== null && wf !== 'true' && wf !== 'false') return badRequest('with_facets', '只接受 true / false')
 
   let rows = published()
   if (cat) rows = rows.filter((a) => a.category_id === Number(cat))
@@ -71,6 +84,7 @@ export function listPublished(sp) {
     page: page.value,
     page_size: size.value,
     total: rows.length, // total 基于筛选后的结果集（X-ISO-03）
+    facets: wf === 'true' ? publicFacets() : null,
   })
 }
 

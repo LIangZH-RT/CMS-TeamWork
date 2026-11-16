@@ -1,10 +1,12 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import PublicLayout from '@/layouts/PublicLayout.vue'
+import { isId } from '@/utils/query'
 
 // 路由分区（全前端共用，A 维护）：
-// - /            博客前台（PublicLayout，匿名只读）——本分支实现
-// - /login 等    认证页（F 实现，预留，本期不在前台放入口）
-// - /admin/**    编辑与管理员后台（F / G 实现，使用独立 AdminLayout，不挂在 PublicLayout 下）
+// - /                博客前台（PublicLayout，匿名只读）
+//   /category/:id    分类页；tag_ids、page 走 query
+// - /login 等        认证页（F 实现）。前台顶栏「作者登录」已链到 /login，页面合入前落到统一 404
+// - /admin/**        编辑与管理员后台（F / G 实现，使用独立 AdminLayout，不挂在 PublicLayout 下）
 // 预留分区在对应页面合入前不注册路由，访问时落到前台统一 404。
 // 守卫只做体验，不承担任何权限职责（architecture §3.3）。
 const routes = [
@@ -12,9 +14,21 @@ const routes = [
     path: '/',
     component: PublicLayout,
     children: [
-      { path: '', name: 'blog-home', component: () => import('@/views/public/BlogHome.vue') },
+      {
+        path: '',
+        name: 'blog-home',
+        component: () => import('@/views/public/BlogHome.vue'),
+        // 兼容旧链接 /?category_id=3 → /category/3（保留标签与页码）
+        beforeEnter: (to) => {
+          const raw = Array.isArray(to.query.category_id) ? to.query.category_id[0] : to.query.category_id
+          if (raw == null) return true
+          const { category_id, ...query } = to.query
+          return isId(raw) ? { name: 'blog-category', params: { id: raw }, query } : { name: 'blog-home', query }
+        },
+      },
+      { path: 'category/:id', name: 'blog-category', component: () => import('@/views/public/BlogCategory.vue') },
       { path: 'posts/:id', name: 'blog-article', component: () => import('@/views/public/BlogArticle.vue') },
-      // 前台统一 404：未知路径与「文章不存在 / 未发布」同一文案，不暗示是否曾经存在
+      // 前台统一 404：未知路径、未知分类与「文章不存在 / 未发布」同一文案，不暗示是否曾经存在
       { path: ':pathMatch(.*)*', name: 'not-found', component: () => import('@/views/public/NotFound.vue') },
     ],
   },

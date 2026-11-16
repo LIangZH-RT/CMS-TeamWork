@@ -20,11 +20,28 @@ describe('契约 mock：公开列表', () => {
     expect(list('tag_ids=1&tag_ids=10').items.every((a) => [1, 10].every((t) => a.tags.some((x) => x.id === t)))).toBe(true)
   })
   it('无结果返回空列表，不报错；未知参数忽略', () => {
-    expect(list('category_id=7')).toEqual({ items: [], page: 1, page_size: 20, total: 0 })
+    expect(list('category_id=7')).toEqual({ items: [], page: 1, page_size: 20, total: 0, facets: null })
     expect(list('status=DRAFT&author_id=11').total).toBe(list('').total)
   })
   it('分页参数非法返回 400', () => {
     expect(handle('GET', '/api/public/articles?page_size=101').status).toBe(400)
+  })
+})
+
+describe('契约 mock：facets', () => {
+  it('只含已发布文章引用的分类、标签，按 id 升序', () => {
+    const f = list('with_facets=true').facets
+    expect(f.categories.map((c) => c.id)).toEqual([1, 2, 3, 4, 5, 6])
+    expect(f.tags.map((t) => t.id)).not.toContain(15)
+    expect(Object.keys(f.categories[0]).sort()).toEqual(['id', 'name'])
+  })
+  it('与筛选、分页无关；不请求时为 null', () => {
+    const all = list('with_facets=true').facets
+    expect(list('with_facets=true&category_id=3&tag_ids=5&page=9').facets).toEqual(all)
+    expect(list('with_facets=false').facets).toBeNull()
+  })
+  it('with_facets 只接受 true / false', () => {
+    expect(handle('GET', '/api/public/articles?with_facets=1').status).toBe(400)
   })
 })
 
