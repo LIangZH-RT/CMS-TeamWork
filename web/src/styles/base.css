@@ -1,0 +1,26 @@
+:root {
+  --ink: #1f2328;
+  --ink-2: #5b5448;
+  --muted: #8a8174;
+  --line: #ebe6dc;
+  --card-line: #ede8de;
+  --paper: #faf8f4;
+  --accent: #c2410c;
+  --accent-soft: #fff4ed;
+  --serif: 'Noto Serif CJK SC', 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', serif;
+  --sans: 'Inter', 'Noto Sans CJK SC', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --el-color-primary: #c2410c;
+  --el-font-family: var(--sans);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+a { color: inherit; text-decoration: none; }
+button { font: inherit; }
+code, pre { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
+.chip {
+  display: inline-flex; align-items: center; gap: 4px; border: 1px solid #e2dccf; background: #fff; color: var(--ink-2);
+  border-radius: 999px; padding: 2px 10px; font-size: 12px; line-height: 20px; cursor: pointer; white-space: nowrap;
+}
+.chip:hover { border-color: var(--accent); color: var(--accent); }
+.chip.cat { color: var(--accent); font-weight: 600; border-color: #f3d9c8; background: var(--accent-soft); }
+.chip.on { background: var(--ink); border-color: var(--ink); color: var(--paper); }
