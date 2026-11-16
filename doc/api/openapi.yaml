@@ -283,6 +283,37 @@ paths:
           $ref: '#/components/responses/CsrfInvalid'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/articles/counts:
+    get:
+      tags:
+      - ARTICLE
+      summary: 按状态计数【补充】
+      description: '与文章列表同一套归属过滤：编辑只统计本人，管理员统计全部；6 种状态都返回，无文章为 0。不返回 404。
+
+
+        覆盖需求：FR-ARTICLE-003、FR-ARTICLE-006、BR-SEARCH-002、BR-SEARCH-003、X-ISO-03、X-ISO-04'
+      operationId: countArticlesByStatus
+      parameters:
+      - $ref: '#/components/parameters/CategoryFilter'
+      - $ref: '#/components/parameters/TagIdsFilter'
+      - $ref: '#/components/parameters/TitleFilter'
+      - $ref: '#/components/parameters/AuthorFilter'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/StatusCounts'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
   /api/articles/{id}:
     parameters:
     - $ref: '#/components/parameters/ArticleId'
@@ -1777,7 +1808,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ArticleAction'
-          description: 【补充】
+          description: 【补充】当前请求者在当前状态下可执行的动作，仅作界面提示（口径见 api-spec §4.1）
     ArticleListItem:
       type: object
       required:
@@ -1792,6 +1823,7 @@ components:
       - scheduled_publish_time
       - published_at
       - latest_event
+      - allowed_actions
       properties:
         id:
           type: integer
@@ -1825,6 +1857,11 @@ components:
           nullable: true
         latest_event:
           $ref: '#/components/schemas/LatestEvent'
+        allowed_actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArticleAction'
+          description: 【补充】当前请求者在当前状态下可执行的动作，仅作界面提示（口径见 api-spec §4.1）
     ArticleCreateRequest:
       type: object
       required:
@@ -2084,6 +2121,50 @@ components:
           type: integer
           format: int64
           nullable: true
+    StatusCounts:
+      type: object
+      required:
+      - by_status
+      - total
+      properties:
+        by_status:
+          type: object
+          required:
+          - DRAFT
+          - PENDING_REVIEW
+          - REJECTED
+          - SCHEDULED
+          - PUBLISHED
+          - UNPUBLISHED
+          properties:
+            DRAFT:
+              type: integer
+              format: int64
+              minimum: 0
+            PENDING_REVIEW:
+              type: integer
+              format: int64
+              minimum: 0
+            REJECTED:
+              type: integer
+              format: int64
+              minimum: 0
+            SCHEDULED:
+              type: integer
+              format: int64
+              minimum: 0
+            PUBLISHED:
+              type: integer
+              format: int64
+              minimum: 0
+            UNPUBLISHED:
+              type: integer
+              format: int64
+              minimum: 0
+        total:
+          type: integer
+          format: int64
+          minimum: 0
     CredentialsRequest:
       type: object
       required:

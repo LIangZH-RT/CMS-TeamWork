@@ -310,7 +310,20 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 
 **最近事件类型 `LatestEventType`**：`REJECT`、`UNPUBLISH`（用于列表的「最近一次驳回或下架」）。
 
-**文章可执行动作 `ArticleAction`**【补充】：`EDIT`、`DELETE`、`SUBMIT`、`WITHDRAW`、`RESCHEDULE`、`UPLOAD_MEDIA`、`APPROVE`、`REJECT`、`UNPUBLISH`。仅用于详情里的 `allowed_actions`，帮前端决定显示哪些按钮；服务端仍独立判权。
+**文章可执行动作 `ArticleAction`**【补充】：`EDIT`、`DELETE`、`SUBMIT`、`WITHDRAW`、`RESCHEDULE`、`UPLOAD_MEDIA`、`APPROVE`、`REJECT`、`UNPUBLISH`。用于后台列表项（§4.11）与详情（§4.10）的 `allowed_actions`，帮前端决定显示哪些按钮；**只是界面提示**，服务端执行动作时仍按 §2.3 独立判定 404 / 409，前端不得据此做任何安全判断。
+
+`allowed_actions` 计算口径（按当前请求者、文章当前状态计算；不满足条件的动作不出现，无可执行动作时为 `[]`）：
+
+| 文章状态 | 归属编辑 | 管理员 |
+|---|---|---|
+| `DRAFT` | `EDIT`、`UPLOAD_MEDIA`、`SUBMIT`；且**无任何留痕**时另有 `DELETE`（BR-DEL-001） | `[]` |
+| `PENDING_REVIEW` | `[]` | `APPROVE`、`REJECT` |
+| `REJECTED` | `EDIT`、`UPLOAD_MEDIA`、`SUBMIT` | `[]` |
+| `SCHEDULED` | `WITHDRAW`；原预定时间尚未到达时另有 `RESCHEDULE`（BR-PUB-008） | `[]` |
+| `PUBLISHED` | `[]` | `UNPUBLISH` |
+| `UNPUBLISHED` | `EDIT`、`UPLOAD_MEDIA`、`SUBMIT` | `[]` |
+
+编辑只能看到本人文章，因此不存在「编辑看他人文章」的取值。
 
 ### 4.2 用户 `User`
 
@@ -455,6 +468,7 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | `scheduled_publish_time` | datetime | 是 | 【补充】 |
 | `published_at` | datetime | 是 | 【补充】 |
 | `latest_event` | LatestEvent | 是 | 最近一次驳回**或**下架，跨类型取最新一条；都没发生过为 `null` |
+| `allowed_actions` | ArticleAction[] | 否 | 【补充】口径见 §4.1；用于列表行内按钮（如草稿能否删除），与详情一致 |
 
 `LatestEvent`：
 
@@ -701,7 +715,8 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
           "type": "UNPUBLISH", "operated_at": "2026-10-02T09:00:00+08:00",
           "operator": { "type": "USER", "id": 1, "username": "admin" },
           "reject_category": null, "reason": "技术结论已过期，需更新"
-        }
+        },
+        "allowed_actions": ["EDIT", "UPLOAD_MEDIA", "SUBMIT"]
       }
     ],
     "page": 1, "page_size": 20, "total": 1
@@ -897,6 +912,35 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 - **覆盖需求**：FR-SUBMIT-003、BR-PUB-008、§5.5、§5.6。
 
 > 「先 400 还是先 409」：若新时间不合法、同时原时间已到达，按 §2.3 的顺序先返回 400（请求格式问题）。见 §16 问题 6。
+
+### 6.9 `GET /api/articles/counts` 按状态计数【补充】
+
+- **说明**：返回各状态的文章数量，用于「我的文章」「全部文章」的状态标签页角标（SRS §4.5「列表、筛选、计数」）。与 #6 走**同一套归属过滤**：编辑只统计本人文章，管理员统计全部（BR-SEARCH-002、BR-SEARCH-003）。收口 §16 问题 12。
+- **权限**：已登录（EDITOR、ADMIN）。
+- **查询参数**：与 #6 相同，但**没有** `status`、`page`、`page_size`、`sort`：
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `category_id` | int64 | 否 | 按分类 |
+| `tag_ids` | int64[] | 否 | 多值，交集语义 |
+| `title` | string | 否 | 标题模糊匹配 |
+| `author_id` | int64 | 否 | 管理员可用；编辑传入时与本人条件取交集 |
+
+- **响应 200**：6 种状态都返回，没有文章的状态为 `0`；`total` 为 6 项之和。
+
+```json
+{
+  "code": 0, "message": "OK",
+  "data": {
+    "by_status": { "DRAFT": 3, "PENDING_REVIEW": 1, "REJECTED": 0, "SCHEDULED": 1, "PUBLISHED": 5, "UNPUBLISHED": 1 },
+    "total": 11
+  }
+}
+```
+
+- **错误**：`400 PARAM_INVALID`（参数类型错误）、`401 UNAUTHENTICATED`。**不会返回 404**，无结果时为全 0（X-ISO-04）。
+- **路由说明**：`counts` 不是数字，与 `/api/articles/{id}`（int64）不冲突；后端需先匹配本路径。
+- **覆盖需求**：FR-ARTICLE-003、FR-ARTICLE-006、BR-SEARCH-002、BR-SEARCH-003、X-ISO-01、X-ISO-03、X-ISO-04；SRS §4.5 权限矩阵「计数」。
 
 ---
 
@@ -1338,8 +1382,9 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | 29 | MEDIA | GET | `/api/media/{media_id}` | 媒体文件出口 | 匿名（按文章状态判权） | |
 | 30 | PUBLIC | GET | `/api/public/articles` | 已发布文章列表 | 匿名 | |
 | 31 | PUBLIC | GET | `/api/public/articles/{id}` | 已发布文章详情 | 匿名 | |
+| 32 | ARTICLE | GET | `/api/articles/counts` | 按状态计数（我的 / 全部） | 编辑、管理员 | 【补充】 |
 
-**合计 31 个接口**：AUTH 5、ARTICLE 5、SUBMIT 3、REVIEW 5、AUDIT 1、TAX 8、MEDIA 2、PUBLIC 2。
+**合计 32 个接口**：AUTH 5、ARTICLE 6、SUBMIT 3、REVIEW 5、AUDIT 1、TAX 8、MEDIA 2、PUBLIC 2。新增接口编号顺延（#32），不重排已有编号，避免引用失效。
 
 ### 13.1 权限矩阵对照（SRS §4.5 → 接口）
 
@@ -1347,7 +1392,7 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 |---|---|---|---|---|
 | 创建文章 | #7 | ✓ | — | 404 |
 | 读取详情 | #8 | ✓ | 404 | ✓ |
-| 列表、筛选、计数 | #6 | 仅本人结果集 | — | 全部 |
+| 列表、筛选、计数 | #6、#32 | 仅本人结果集 | — | 全部 |
 | 编辑内容 | #9 | 草稿、驳回、已下架，否则 409 | 404 | 404 |
 | 删除 | #10 | 仅无留痕草稿，否则 409 | 404 | 404 |
 | 提交审核 | #11 | 草稿、驳回、已下架，否则 409 | 404 | 404 |
@@ -1385,10 +1430,10 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | FR-USER-005 改派归属 | 后续 | 无（§5.6） |
 | FR-ARTICLE-001 创建草稿 | 本期 | #7 |
 | FR-ARTICLE-002 编辑文章 | 本期 | #9 |
-| FR-ARTICLE-003 我的文章列表 | 本期 | #6（编辑） |
+| FR-ARTICLE-003 我的文章列表 | 本期 | #6（编辑）；#32 计数 |
 | FR-ARTICLE-004 文章详情 | 本期 | #8 |
 | FR-ARTICLE-005 删除草稿 | 本期 | #10 |
-| FR-ARTICLE-006 全部文章列表 | 本期 | #6（管理员） |
+| FR-ARTICLE-006 全部文章列表 | 本期 | #6（管理员）；#32 计数 |
 | FR-SUBMIT-001 提交审核 | 本期 | #11 |
 | FR-SUBMIT-002 撤回 | 本期 | #12 |
 | FR-SUBMIT-003 改期 | 本期 | #13 |
@@ -1417,9 +1462,9 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 
 | 需求 | 承接方式 |
 |---|---|
-| X-ISO-01 数据层归属条件 | #6、#8～#13、#19、#28 由服务端按当前用户附加归属；#29、#30、#31 按各自规则 |
+| X-ISO-01 数据层归属条件 | #6、#8～#13、#19、#28、#32 由服务端按当前用户附加归属；#29、#30、#31 按各自规则 |
 | X-ISO-02 全部查询入口隔离 | #6、#8、#14、#19；公开接口强制已发布；媒体出口独立判权 |
-| X-ISO-03 计数基于过滤后结果 | §1.5 分页规则；#6、#14、#30 |
+| X-ISO-03 计数基于过滤后结果 | §1.5 分页规则；#6、#14、#30、#32 |
 | X-ISO-04 统一 404 与空列表 | §3.2 |
 | X-STATE-01 不得直接写状态 | 无写状态接口；`status` 字段写入即 400（§1.2） |
 | X-STATE-02 发布只有两条路径 | #16 + 系统任务；无发布接口 |
@@ -1483,7 +1528,7 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | 9 | 正文里怎样认定一个链接是「视频链接」？SRS 要求视频链接必须是绝对 https、相对路径的视频链接要拒绝，但又允许普通链接用站内相对地址，而 Markdown 语法上两者没有区别 | 暂按普通链接规则校验。建议约定：指向非本站的链接都视为外链（必须 https），站内相对地址只允许 `/api/media/` 以外的站内页面；或约定视频用专门语法（如 `[video](https://...)`），需团队确认 |
 | 10 | 公开详情里的「正文图片引用、正文视频链接」是否需要单独字段 | 只包含在 `content` 原文中，不单独抽出 |
 | 11 | 是否需要文章编辑的乐观锁（两个标签页同时编辑同一篇文章，后写覆盖前写） | 未加。可选方案：请求带 `expected_updated_at`，不一致返回 409 |
-| 12 | 权限矩阵里的「计数」是否需要单独接口（如按状态统计数量的标签页角标） | 只用列表的 `total`；如需按状态计数，可加 `GET /api/articles/counts`，同样受归属过滤 |
+| 12 | 权限矩阵里的「计数」是否需要单独接口（如按状态统计数量的标签页角标） | **已决（2026-11-16）**：新增 #32 `GET /api/articles/counts`（§6.9），与 #6 同一套归属过滤；列表项同时增加 `allowed_actions`（§4.11） |
 | 13 | 编辑是否应看到分类、标签的 `in_use` | 返回布尔值不返回计数；编辑本来就能通过 409 得知是否被引用 |
 | 14 | 审核标准版本从哪里配置、怎样升级 | 服务端配置项，#15 只读展示 |
 | 15 | 正文图片引用是否允许同一篇文章里重复引用同一个媒体 | 允许 |
