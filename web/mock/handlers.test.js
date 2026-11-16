@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { handle, NOT_FOUND_BODY } from './handlers'
+import { handle, likeMatch, NOT_FOUND_BODY, toLikePattern } from './handlers'
 
 const json = (r) => JSON.parse(r.body)
 const list = (qs) => json(handle('GET', `/api/public/articles?${qs}`)).data
@@ -42,6 +42,41 @@ describe('契约 mock：facets', () => {
   })
   it('with_facets 只接受 true / false', () => {
     expect(handle('GET', '/api/public/articles?with_facets=1').status).toBe(400)
+  })
+})
+
+describe('契约 mock：关键字 q', () => {
+  const ids = (q, extra = '') => list(`q=${encodeURIComponent(q)}&page_size=100${extra}`).items.map((a) => a.id)
+  it('匹配标题或摘要，大小写不敏感', () => {
+    expect(ids('jvm')).toEqual(expect.arrayContaining([109, 112]))
+    expect(ids('ThreadLocal')).toEqual([109]) // 只在摘要里
+  })
+  it('不匹配正文，不返回未发布文章', () => {
+    expect(ids('老年代')).toEqual([]) // 只在 109 正文里
+    expect(ids('待审核')).toEqual([])
+  })
+  it('% 与 _ 按字面匹配', () => {
+    expect(ids('%')).toEqual([114])
+    expect(ids('_')).toEqual([114])
+    expect(ids('user_name')).toEqual([114])
+    expect(ids('100%')).toEqual([114])
+  })
+  it('与标签、分类同时生效，total 为过滤后结果，facets 不受影响', () => {
+    expect(ids('JVM', '&tag_ids=9')).toEqual([109])
+    const d = list('q=JVM&with_facets=true&page_size=1')
+    expect(d.total).toBe(2)
+    expect(d.facets).toEqual(list('with_facets=true').facets)
+  })
+  it('去首尾空白，空串视为未传；超过 100 个字符返回 400', () => {
+    expect(list('q=%20%20').total).toBe(list('').total)
+    expect(handle('GET', `/api/public/articles?q=${'字'.repeat(100)}`).status).toBe(200)
+    expect(handle('GET', `/api/public/articles?q=${'字'.repeat(101)}`).status).toBe(400)
+  })
+  it('LIKE 转义与匹配', () => {
+    expect(toLikePattern('a%b_c\\')).toBe('%a\\%b\\_c\\\\%')
+    expect(likeMatch(toLikePattern('a_c'), 'xa_cx')).toBe(true)
+    expect(likeMatch(toLikePattern('a_c'), 'xabcx')).toBe(false)
+    expect(likeMatch('%a_c%', 'xabcx')).toBe(true)
   })
 })
 

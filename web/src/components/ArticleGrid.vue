@@ -13,6 +13,7 @@ const props = defineProps({
   activeTags: { type: Array, default: () => [] },
   emptyText: { type: String, default: '还没有已发布的文章' },
   canClear: { type: Boolean, default: false },
+  highlight: { type: String, default: '' },
 })
 const emit = defineEmits(['pick-category', 'toggle-tag', 'page', 'clear', 'retry'])
 const outOfRange = computed(() => props.state === 'ready' && !props.items.length && props.total > 0)
@@ -36,6 +37,7 @@ const outOfRange = computed(() => props.state === 'ready' && !props.items.length
         :article="a"
         :active-category="activeCategory"
         :active-tags="activeTags"
+        :highlight="highlight"
         @pick-category="emit('pick-category', $event)"
         @toggle-tag="emit('toggle-tag', $event)"
       />

@@ -1,10 +1,11 @@
 <script setup>
-// 博客前台布局：顶栏（品牌、分类导航、作者登录）+ 页脚。
+// 博客前台布局：顶栏（品牌、分类导航、搜索框、作者登录）+ 页脚。
 // 分类导航来自公开列表 facets（api-spec §4.14），前 6 个直接显示，其余收进「更多」。
 // 「作者登录」只链到预留的 /login：登录 / 注册页由 F 实现，合入前该路由落到统一 404。
 import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTaxonomy } from '@/stores/taxonomy'
+import SearchBox from '@/components/SearchBox.vue'
 
 const NAV_MAX = 6
 const useMock = import.meta.env.VITE_USE_MOCK === 'true'
@@ -46,6 +47,7 @@ const goCategory = (id) => router.push({ name: 'blog-category', params: { id: St
           </el-dropdown>
         </nav>
         <div class="tools">
+          <SearchBox />
           <router-link to="/login" class="login">作者登录</router-link>
         </div>
       </div>

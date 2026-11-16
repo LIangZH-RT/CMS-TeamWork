@@ -5,6 +5,7 @@ import { isId } from '@/utils/query'
 // 路由分区（全前端共用，A 维护）：
 // - /                博客前台（PublicLayout，匿名只读）
 //   /category/:id    分类页；tag_ids、page 走 query
+//   /search          搜索页；q、tag_ids、page 走 query（q 为范围延伸，api-spec §11.1）
 // - /login 等        认证页（F 实现）。前台顶栏「作者登录」已链到 /login，页面合入前落到统一 404
 // - /admin/**        编辑与管理员后台（F / G 实现，使用独立 AdminLayout，不挂在 PublicLayout 下）
 // 预留分区在对应页面合入前不注册路由，访问时落到前台统一 404。
@@ -27,6 +28,7 @@ const routes = [
         },
       },
       { path: 'category/:id', name: 'blog-category', component: () => import('@/views/public/BlogCategory.vue') },
+      { path: 'search', name: 'blog-search', component: () => import('@/views/public/BlogSearch.vue') },
       { path: 'posts/:id', name: 'blog-article', component: () => import('@/views/public/BlogArticle.vue') },
       // 前台统一 404：未知路径、未知分类与「文章不存在 / 未发布」同一文案，不暗示是否曾经存在
       { path: ':pathMatch(.*)*', name: 'not-found', component: () => import('@/views/public/NotFound.vue') },

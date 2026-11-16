@@ -37,16 +37,17 @@ const pickFacets = (f) =>
 
 /**
  * GET /api/public/articles
- * @param {{page?: number, page_size?: number, category_id?: string|null, tag_ids?: string[], with_facets?: boolean}} q
- * ID 以字符串传递，避免 int64 在 JS 里丢精度
+ * @param {{page?: number, page_size?: number, category_id?: string|null, tag_ids?: string[], q?: string, with_facets?: boolean}} p
+ * ID 以字符串传递，避免 int64 在 JS 里丢精度；q 为标题 + 摘要关键字（§11.1，范围延伸）
  */
-export async function listPublicArticles({ page = 1, page_size = PUBLIC_PAGE_SIZE, category_id = null, tag_ids = [], with_facets = false } = {}) {
+export async function listPublicArticles({ page = 1, page_size = PUBLIC_PAGE_SIZE, category_id = null, tag_ids = [], q = '', with_facets = false } = {}) {
   const data = await http.get('/api/public/articles', {
     params: {
       page,
       page_size,
       category_id: category_id || undefined,
       tag_ids: tag_ids.length ? tag_ids : undefined,
+      q: q || undefined,
       with_facets: with_facets ? true : undefined,
     },
   })

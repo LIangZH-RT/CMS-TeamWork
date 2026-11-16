@@ -36,3 +36,44 @@ export function toggleTag(f, id) {
   const tag_ids = f.tag_ids.includes(s) ? f.tag_ids.filter((t) => t !== s) : [...f.tag_ids, s]
   return { ...f, page: 1, tag_ids }
 }
+
+// ---- 搜索页 /search?q=&tag_ids=&page= ----
+// q 与后端同口径（api-spec §11.1）：去首尾空白，空串视为未传，最多 100 个 Unicode 码点（超出截断，不发会被 400 的请求）
+export const Q_MAX = 100
+
+export function normalizeKeyword(raw) {
+  const s = (Array.isArray(raw) ? raw[0] : raw) ?? ''
+  return [...String(s).trim()].slice(0, Q_MAX).join('').trim()
+}
+
+export function parseSearchQuery(q = {}) {
+  const { page, tag_ids } = parseListQuery(q)
+  return { q: normalizeKeyword(q.q), page, category_id: null, tag_ids }
+}
+
+export function toSearchRouteQuery({ q = '', page = 1, tag_ids = [] }) {
+  const out = {}
+  const kw = normalizeKeyword(q)
+  if (kw) out.q = kw
+  return { ...out, ...toRouteQuery({ page, category_id: null, tag_ids }) }
+}
+
+/**
+ * 把文本按关键字切成片段，供模板逐段渲染（命中段用 <mark>）。只返回纯文本片段，不拼 HTML。
+ * 大小写不敏感；关键字按字面匹配（% _ 不是通配符）。
+ */
+export function splitHighlight(text, kw) {
+  const t = text ?? ''
+  if (!kw) return [{ text: t, hit: false }]
+  const lower = t.toLowerCase()
+  const k = kw.toLowerCase()
+  const out = []
+  let i = 0
+  for (let j = lower.indexOf(k); j !== -1 && k; j = lower.indexOf(k, i)) {
+    if (j > i) out.push({ text: t.slice(i, j), hit: false })
+    out.push({ text: t.slice(j, j + k.length), hit: true })
+    i = j + k.length
+  }
+  if (i < t.length) out.push({ text: t.slice(i), hit: false })
+  return out.length ? out : [{ text: t, hit: false }]
+}

@@ -1,5 +1,5 @@
 // 契约 mock：按 api-spec §1.4 / §1.5 / §3.2 / §10.2 / §11 实现三个公开出口。
-// 只覆盖博客前台用到的 GET /api/public/articles（含 with_facets）、GET /api/public/articles/{id}、GET /api/media/{id}；
+// 只覆盖博客前台用到的 GET /api/public/articles（含 with_facets、q）、GET /api/public/articles/{id}、GET /api/media/{id}；
 // 其他 /api/** 一律返回统一 404 体（本 mock 不模拟后台接口；分类 / 标签导航走 facets，没有单独的公开接口）。
 import { articles, categories, tags, media } from './db.js'
 import { makeCoverPng, makeDiagramPng, makeWav } from './assets.js'
@@ -51,6 +51,25 @@ function intParam(sp, name, { def, min, max }) {
   return { value: n }
 }
 
+const Q_MAX = 100
+
+/** api-spec §11.1：把关键字转成 LIKE 模式 '%…%'，先转义 \ % _（ESCAPE '\'） */
+export const toLikePattern = (q) => `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
+
+/** 按 SQL LIKE 语义匹配（% 任意串、_ 任意单字符、\ 转义下一个字符），大小写不敏感，模拟 MySQL 默认排序规则 */
+export function likeMatch(pattern, text) {
+  let re = ''
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i]
+    if (c === '\\' && i + 1 < pattern.length) re += escapeRe(pattern[++i])
+    else if (c === '%') re += '[\\s\\S]*'
+    else if (c === '_') re += '[\\s\\S]'
+    else re += escapeRe(c)
+  }
+  return new RegExp(`^${re}$`, 'iu').test(text)
+}
+const escapeRe = (c) => c.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
+
 /** §4.14 PublicFacets：全部已发布文章当前引用的分类、标签，按 id 升序；与本次筛选、分页无关 */
 export function publicFacets() {
   const rows = published()
@@ -72,12 +91,19 @@ export function listPublished(sp) {
   if (cat !== null && cat !== '' && !ID_RE.test(cat)) return badRequest('category_id', '必须是正整数')
   const tagIds = sp.getAll('tag_ids').filter((v) => v !== '')
   if (tagIds.some((v) => !ID_RE.test(v))) return badRequest('tag_ids', '必须是正整数')
+  const q = (sp.get('q') ?? '').trim()
+  if ([...q].length > Q_MAX) return badRequest('q', `不能超过 ${Q_MAX} 个字符`)
   const wf = sp.get('with_facets')
   if (wf !== null && wf !== 'true' && wf !== 'false') return badRequest('with_facets', '只接受 true / false')
 
   let rows = published()
   if (cat) rows = rows.filter((a) => a.category_id === Number(cat))
   for (const t of new Set(tagIds.map(Number))) rows = rows.filter((a) => a.tag_ids.includes(t))
+  if (q) {
+    // 只匹配标题或摘要，不匹配正文（SRS §3.2 不做全文检索）
+    const pat = toLikePattern(q)
+    rows = rows.filter((a) => likeMatch(pat, a.title) || likeMatch(pat, a.excerpt ?? ''))
+  }
   const start = (page.value - 1) * size.value
   return ok({
     items: rows.slice(start, start + size.value).map(toListItem),
