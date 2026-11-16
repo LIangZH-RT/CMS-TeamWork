@@ -10,6 +10,8 @@ import { isId, parseListQuery, toggleTag, toRouteQuery } from '@/utils/query'
 import ArticleGrid from '@/components/ArticleGrid.vue'
 import ActiveTagFilters from '@/components/ActiveTagFilters.vue'
 import CategoryPills from '@/components/CategoryPills.vue'
+import TagFilterPanel from '@/components/TagFilterPanel.vue'
+import AboutCard from '@/components/AboutCard.vue'
 import NotFound from '@/views/public/NotFound.vue'
 
 const route = useRoute()
@@ -55,24 +57,30 @@ const onPage = (p) => go({ ...filter.value, page: p })
     </header>
 
     <div class="body">
-      <CategoryPills :active="id" />
-      <ActiveTagFilters :tag-ids="filter.tag_ids" :total="state === 'ready' ? result.total : null" @toggle="onToggleTag" @clear="clearTags" />
-      <ArticleGrid
-        :state="state"
-        :items="result.items"
-        :total="result.total"
-        :page="filter.page"
-        :page-size="result.page_size"
-        :active-category="id"
-        :active-tags="filter.tag_ids"
-        :empty-text="filter.tag_ids.length ? '该分类下没有同时包含所选标签的文章' : '该分类下还没有已发布的文章'"
-        :can-clear="filter.tag_ids.length > 0"
-        @pick-category="pickCategory"
-        @toggle-tag="onToggleTag"
-        @page="onPage"
-        @clear="clearTags"
-        @retry="reload"
-      />
+      <div class="list">
+        <CategoryPills :active="id" />
+        <ActiveTagFilters :tag-ids="filter.tag_ids" :total="state === 'ready' ? result.total : null" @toggle="onToggleTag" @clear="clearTags" />
+        <ArticleGrid
+          :state="state"
+          :items="result.items"
+          :total="result.total"
+          :page="filter.page"
+          :page-size="result.page_size"
+          :active-category="id"
+          :active-tags="filter.tag_ids"
+          :empty-text="filter.tag_ids.length ? '该分类下没有同时包含所选标签的文章' : '该分类下还没有已发布的文章'"
+          :can-clear="filter.tag_ids.length > 0"
+          @pick-category="pickCategory"
+          @toggle-tag="onToggleTag"
+          @page="onPage"
+          @clear="clearTags"
+          @retry="reload"
+        />
+      </div>
+      <aside class="aside">
+        <TagFilterPanel :selected="filter.tag_ids" @toggle="onToggleTag" @clear="clearTags" />
+        <AboutCard />
+      </aside>
     </div>
   </main>
 </template>
@@ -83,5 +91,10 @@ const onPage = (p) => go({ ...filter.value, page: p })
 .eyebrow { font-size: 13px; letter-spacing: 0.18em; color: var(--accent); font-weight: 600; margin: 0 0 10px; }
 h1 { font-family: var(--serif); font-size: 34px; margin: 0 0 8px; font-weight: 900; }
 .lead { color: var(--muted); font-size: 14px; margin: 0; }
-.body { padding-top: 32px; }
+.body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 40px; padding-top: 32px; align-items: start; }
+.aside { display: grid; gap: 20px; position: sticky; top: 88px; }
+@media (max-width: 960px) {
+  .body { grid-template-columns: 1fr; }
+  .aside { position: static; }
+}
 </style>
