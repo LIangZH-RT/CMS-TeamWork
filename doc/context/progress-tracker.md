@@ -8,9 +8,9 @@
 
 ## Current Phase
 
-**设计阶段 —— 需求基线与架构基线已产出，尚未进入实现。**
+**实现准备 —— 需求基线、架构基线与接口草案已产出，尚未进入代码实现。**
 
-`src/` 为空：无代码、无数据库 schema、无接口定义。仓库现有内容全是文档。
+`src/` / `web/` 仍为空：无业务代码、无数据库 schema。仓库以文档为主；`doc/api/` 已有接口规范草案。
 
 **2026-09-29 方向调整：`CMS-SRS.md` 转为主文档。** 此前的方向是绕的——SRS 抬头写"导出版本、请勿直接修改，内容的唯一事实来源为 `doc/context/project-overview.md`"，而 project-overview 又反过来写"发生表述冲突时以 SRS 为准"。两头互相指认，谁也定不了谁是源。
 
@@ -18,7 +18,7 @@
 
 ## Current Goal
 
-依据 SRS v2.5（冻结基线）开展实现准备，明确接口字段与实现方案。审核通过/立即发布由审核通过请求原子完成；列表展示最近一次驳回或下架的原因与时间（含跨类型取最新与空值语义）；正文图片只引用本文章 CMS 媒体、危险协议与非 https 链接拒绝；留痕字段条件必填与可空语义；媒体真实格式按文件内容判定；会话安全基线（有效期/Cookie 属性/失败锁定/会话固定）。以上各项均已有对应验收场景（§9.2、§9.3 TU-22~TU-25）。
+依据 SRS v2.5 与 `doc/api/api-spec.md` 草案推进实现准备：收口 api-spec §16 待确认问题、补齐表字段级定义，然后进入后端脚手架与 Flyway。架构已按 SRS 修正到期发布幂等与媒体清理／判权口径（见 Completed）。
 
 ## Completed
 
@@ -53,17 +53,27 @@
 - 清掉 README 引用（`project-overview.md` §10.4 与本文件 Completed 各一处）——仓库内从来没有 README，该引用一直是空指针
 - 新增 `doc/context/git-standards.md`（现 v1.1，精简版）：按 **Conventional Commits 1.0.0** 列出提交信息格式与规则、类型/范围取值表、提交粒度与分支、`revert` 与历史改写、换行符、`commit-msg` 钩子方案。**历史提交中有 3 条不符合该规范（未改写）**
 
+**2026-11-16 接口草案** —— `doc/api/api-spec.md` + `doc/api/openapi.yaml`（草案 v0.1）
+- 8 个模块、31 个接口：统一响应体、错误码、分页、会话与 CSRF、需求追溯、§15 文档冲突与 §16 待确认问题
+- 同步新增根目录 `AGENTS.md`，锁定文档优先级、技术栈、不变量与 Git 规范
+
+**2026-11-16 架构按 SRS 对齐（api-spec §15 冲突 3～6）**
+- §6.1 到期发布去掉 `published_at IS NULL`；INV-07 改为「同周期不覆盖、跨周期更新」
+- §6.2 媒体清理改为未关联满 24 小时／60 秒内清理，并覆盖移除、替换、删文
+- §5.4 媒体判权补「从未关联」与「已失去全部引用」两类
+- §5.1 CSRF 改为会话绑定令牌（`HttpSessionCsrfTokenRepository`）
+
 ## In Progress
 
-**需求复审与冻结已完成**：SRS v2.5 已补齐六项 P1 复审发现并冻结为需求基线。仓库尚无实现，本次只完成文档一致性与需求覆盖检查，未执行功能验收。
+**接口草案待团队确认**：`api-spec.md` §16 共 16 个待确认问题；实现代码尚未开始。
 
 ## Next Up
 
-1. 实现前按 SRS v2.5 核对内部架构，重点检查审核轮次匹配、撤回时间边界、公开返回信息和账号规范化
-2. 补 `doc/context/ui-context.md`、`code-standards.md`、`ai-workflow-rules.md` —— CLAUDE.md 要求动手前依次读这 3 个，它们至今不存在（`git-standards.md` 已于 2026-10-10 建好，但 CLAUDE.md 的清单里也没有它）
-3. 各数据库表的字段级定义 —— 2026-09-28 删除数据库设计文档后无处可查，目前只有 `audit_log` 的操作人列寄存在 architecture §4.1
-4. 接口清单与字段级签名（REST 路径、请求响应字段、错误码、分页排序、幂等语义）
-5. 非功能需求（性能、并发、可用性、日志监控、定时扫描间隔与失败重试）
+1. 收口 `doc/api/api-spec.md` §16 待确认问题（一次一个，给具名选项）
+2. 各数据库表的字段级定义 —— 目前只有 `audit_log` 的操作人列寄存在 architecture §4.1
+3. 补 `doc/context/ui-context.md`、`code-standards.md`、`ai-workflow-rules.md`（CLAUDE.md 清单里仍指向它们，且路径过时）
+4. 后端脚手架：Spring Boot 3 + 包结构 + Flyway 初版 + Testcontainers 冒烟
+5. 非功能需求（性能、并发、可用性、日志监控、定时扫描间隔与失败重试）—— 部分已在 SRS／architecture，仍可补独立小节
 6. 回补 `doc/reference/chatgpt-srs-conversation.md` —— **用户已表示暂不处理**
 
 ## Open Questions
@@ -142,7 +152,7 @@
 - 本文件**不记提交号**：本仓库历史会被变基／改写（2026-10-10 一次 `amend` 就把已写下的哈希作废了），哈希留不住，记了反而变成悬空引用。
 - 历史里那条 `Revert "create project"` 是事故残留，**不是有人故意清空项目**。
 
-**文件清单**（共 7 个）：`CMS-SRS.md`（根目录，**唯一主文档**）；`doc/context/` 下 4 份（project-overview / architecture / progress-tracker / git-standards）；`doc/design/traceability-check.py`（已暂停使用）；`doc/reference/chatgpt-srs-conversation.md`（**缺失**）。
+**文件清单**：`CMS-SRS.md`（根目录，**唯一主文档**）；`AGENTS.md`；`doc/api/`（api-spec + openapi）；`doc/context/` 下 4 份（project-overview / architecture / progress-tracker / git-standards）；`doc/design/traceability-check.py`（已暂停使用）；`doc/reference/chatgpt-srs-conversation.md`（**缺失**）。
 已删除、不要再引用：`doc/requirements/*.md`、`doc/design/database-design.md`。
 
 **仍未恢复**：`doc/reference/chatgpt-srs-conversation.md`（需求原始输入归档，18 轮）。多个文档仍引用它，但它从未出现在任何一次提交历史里。它是"这条规则当初为什么这么定"的最终依据——缺了它，后续任何规则复核都只能靠现有文档自证，而现有文档自证恰恰是今天两处缺口得以长期存在的条件。**用户已表示暂不处理。**

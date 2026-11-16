@@ -1428,10 +1428,10 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 |---|---|---|
 | 1 | 本次任务描述建议「JWT / Token 请求头鉴权」，但 SRS FR-AUTH-003、§4.1.2 要求 httpOnly Cookie 会话、服务端销毁会话、会话固定防护；architecture §5.1 明确否决 JWT | **按 SRS 用 Cookie 会话 + CSRF**，不用 JWT |
 | 2 | 本次任务描述建议基础路径 `/api/v1`，architecture §5.1～5.5 已定 `/api/auth/*`、`/api/public/**`、`/api/media/{mediaId}` | 沿用 `/api`，不加版本号。如需版本化，整体换成 `/api/v1` 即可，不影响其他设计 |
-| 3 | architecture §6.1 到期发布 SQL 带 `published_at IS NULL` 条件，并称「一旦非空永不被覆盖」（INV-07）；但 SRS §5.5、BR-PUB-006 要求下架后重新过审再次发布时**更新**为本次时间 | 接口按 SRS 处理：再次发布时 `published_at` 更新。**architecture 的 SQL 和 INV-07 需要修改**：下架后重新过审、且设了未来预定时间的文章，`published_at` 已有上次取值，到期时该条件永远不满足，会永远停在「待发布」。建议改为用「本发布周期是否已有发布留痕」来防重复 |
-| 4 | architecture §6.2 孤儿文件「修改时间超过 N 天」才清理，且只按有无 `media_file` 记录判断；SRS BR-MEDIA-004 要求未关联上传满 **24 小时**后 60 秒内清理，并要清理已移除、替换的文件 | 按 SRS（§12） |
-| 5 | architecture §5.4 媒体判权第 2 步「文章已发布即直接回写」，没有考虑「已失去全部引用的旧文件」和「从未关联的上传文件」；SRS FR-MEDIA-002 要求这两类分别「任何人不可读」和「仅归属编辑、管理员可读」 | 按 SRS（§10.2 判权表） |
-| 6 | architecture §5.1 用 `CookieCsrfTokenRepository`（双重提交 Cookie，令牌不绑定会话）；SRS §4.1.2 写的是「已认证会话下使用会话绑定令牌」 | 接口形态两者通用（`X-XSRF-TOKEN` 请求头）；实现时建议改用会话存储的令牌（`HttpSessionCsrfTokenRepository`）并通过 #1 下发，以贴合 SRS 原文 |
+| 3 | architecture §6.1 到期发布 SQL 曾带 `published_at IS NULL`，INV-07 曾写「一旦非空永不被覆盖」；与 SRS §5.5、BR-PUB-006 冲突 | **已按 SRS 对齐（2026-11-16）**：去掉该条件；同周期靠状态门闩 + 无发布留痕防重复；跨周期允许更新 `published_at` |
+| 4 | architecture §6.2 曾写孤儿文件「超过 N 天」才清理；与 BR-MEDIA-004 的 24 小时／60 秒口径冲突 | **已按 SRS 对齐（2026-11-16）**：见 architecture §6.2 与本文 §12 |
+| 5 | architecture §5.4 曾在「已发布即回写」前未区分从未关联／已失去引用；与 FR-MEDIA-002 冲突 | **已按 SRS 对齐（2026-11-16）**：见 architecture §5.4 与本文 §10.2 |
+| 6 | architecture §5.1 曾用 `CookieCsrfTokenRepository`；SRS §4.1.2 要求会话绑定令牌 | **已按 SRS 对齐（2026-11-16）**：改为 `HttpSessionCsrfTokenRepository`，由 `#1` 下发；接口仍用 `X-XSRF-TOKEN` |
 | 7 | `project-overview.md` 写「公开文章接口支持按状态、分类、标签、归属编辑筛选及标题模糊匹配」；SRS FR-PUBLIC-001 只规定分页和分类、标签筛选，并禁止任何状态参数 | 按 SRS，公开接口只有分类和标签筛选 |
 | 8 | `project-overview.md` 写留痕只有 6 类（缺「到期自动发布」）；SRS §6.6 为 7 类 | 按 SRS，7 类 |
 | 9 | architecture §4.1 规定 `article.status` 存中文字面量 | 数据库存中文不影响接口；接口用英文枚举，由后端映射（§4.1） |
