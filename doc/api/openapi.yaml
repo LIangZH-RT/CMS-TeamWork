@@ -39,7 +39,7 @@ paths:
       tags:
       - AUTH
       summary: 获取 CSRF 令牌【补充】
-      description: '下发 XSRF-TOKEN Cookie 并在响应体返回。
+      description: '在响应体返回会话绑定的 CSRF 令牌（HttpSessionCsrfTokenRepository）；不下发可读的 CSRF Cookie。登录、登出后需重新获取。
 
 
         覆盖需求：§4.1.2、FR-AUTH-003'
@@ -103,7 +103,7 @@ paths:
       tags:
       - AUTH
       summary: 登录
-      description: '成功后更换会话标识并下发 JSESSIONID（HttpOnly; SameSite=Lax; Path=/）。不需要 CSRF。连续 5 次失败锁定 15 分钟；失败与锁定响应一致（40101）。
+      description: '成功后更换会话标识并下发 JSESSIONID（HttpOnly; SameSite=Lax; Path=/），登录前的 CSRF 令牌随之失效。不需要 CSRF。连续 5 次失败锁定 15 分钟；失败与锁定响应一致（40101）。
 
 
         覆盖需求：FR-AUTH-001、FR-AUTH-003、§4.1.2'
@@ -1202,7 +1202,7 @@ components:
       type: apiKey
       in: header
       name: X-XSRF-TOKEN
-      description: CSRF 令牌，取自 XSRF-TOKEN Cookie 或 GET /api/auth/csrf
+      description: CSRF 令牌，只能通过 GET /api/auth/csrf 的响应体获取（会话绑定）
   parameters:
     ArticleId:
       name: id

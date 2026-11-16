@@ -160,12 +160,14 @@
 
 | 项 | 取值 |
 |---|---|
-| 令牌下发 | 服务端写入非 httpOnly 的 Cookie `XSRF-TOKEN`，同时在 `GET /api/auth/csrf` 的响应体里返回 |
+| 令牌存储 | 会话绑定（`HttpSessionCsrfTokenRepository`，architecture §5.1、§15 冲突 6）：令牌保存在服务端会话中，**不下发可读的 CSRF Cookie** |
+| 令牌下发 | 只通过 `GET /api/auth/csrf`（#1）的响应体 `data.token` 返回；匿名访问会建立匿名会话以绑定令牌（用于注册） |
 | 令牌回传 | 请求头 `X-XSRF-TOKEN: <token>` |
 | 需要 CSRF 的请求 | **除登录外**所有改变状态的请求（POST / PUT / DELETE），包括登出、注册 |
 | 不需要 CSRF 的请求 | `POST /api/auth/login`、所有 GET |
 | 失败 | 令牌缺失或不匹配返回 `403 CSRF_INVALID`，不执行操作 |
-| 令牌轮换 | 登录成功后令牌随会话更换。前端在登录成功后必须重新读取 `XSRF-TOKEN`（或重新调用 `GET /api/auth/csrf`） |
+| 令牌轮换 | 登录成功（会话标识更换）与登出后，旧令牌失效；前端必须重新调用 `GET /api/auth/csrf` 取新令牌 |
+| 前端保存 | 令牌只保存在内存（如 Pinia store），不写 localStorage / Cookie；写请求由统一 Axios 实例加 `X-XSRF-TOKEN` 头。收到 `403 CSRF_INVALID` 时重新获取令牌，可对**幂等或可安全重放**的请求重试一次，其余请求提示用户重新操作 |
 
 ### 2.3 校验顺序（固定）
 
@@ -545,7 +547,7 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 - **说明**：下发 CSRF 令牌，供匿名注册和登录后的写请求使用。SRS §4.1.2 要求「匿名注册使用服务端在注册页下发的令牌」，这里把「下发」落成一个接口。
 - **权限**：匿名可调用。
 - **请求**：无。
-- **响应 200**：同时写入 `Set-Cookie: XSRF-TOKEN=...; Path=/; SameSite=Lax`（非 httpOnly）。
+- **响应 200**：令牌在响应体中返回，并与当前会话绑定（没有会话时创建匿名会话，写入 `JSESSIONID`）。**不写入** `XSRF-TOKEN` Cookie（§2.2）。
 
 ```json
 { "code": 0, "message": "OK", "data": { "header_name": "X-XSRF-TOKEN", "token": "5b0c2f..." } }
@@ -590,7 +592,7 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | `username` | string | 是 | 规范化规则同注册 |
 | `password` | string | 是 | 按原始输入校验 |
 
-- **响应 200**：响应头带 `Set-Cookie: JSESSIONID=...; HttpOnly; SameSite=Lax; Path=/; Max-Age=43200`（HTTPS 时加 `Secure`），并轮换 `XSRF-TOKEN`。
+- **响应 200**：响应头带 `Set-Cookie: JSESSIONID=...; HttpOnly; SameSite=Lax; Path=/; Max-Age=43200`（HTTPS 时加 `Secure`）。会话标识更换后，登录前取得的 CSRF 令牌失效，前端需重新调用 #1（§2.2）。
 
 ```json
 { "code": 0, "message": "OK", "data": { "user": { "id": 12, "username": "editor_01", "role": "EDITOR", "created_at": "2026-11-15T10:00:00+08:00" } } }
