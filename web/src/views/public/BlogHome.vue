@@ -3,10 +3,10 @@
 // 没有公开分类 / 标签列表接口（用户决定），所以不做完整分类导航：
 // 筛选入口就是文章卡片上的分类 / 标签；当前筛选写在 URL（category_id、tag_ids、page），可一键清除。
 // 不传任何影响可见性的参数（status、author_id…），只展示接口返回项。
-import { computed, ref, watch } from 'vue'
+import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { listPublicArticles, PUBLIC_PAGE_SIZE } from '@/api/public'
 import { useSeenTaxonomy } from '@/stores/seenTaxonomy'
+import { usePublicList } from '@/composables/usePublicList'
 import { hasFilter, parseListQuery, toggleTag, toRouteQuery, withCategory } from '@/utils/query'
 import ArticleCard from '@/components/ArticleCard.vue'
 
@@ -16,31 +16,11 @@ const seen = useSeenTaxonomy()
 
 const filter = computed(() => parseListQuery(route.query))
 const filtered = computed(() => hasFilter(filter.value))
-const state = ref('loading') // loading | ready | error
-const result = ref({ items: [], page: 1, page_size: PUBLIC_PAGE_SIZE, total: 0 })
-let seq = 0
-
-async function load() {
-  const my = ++seq
-  document.title = 'TeamWork 技术博客'
-  state.value = 'loading'
-  try {
-    const r = await listPublicArticles(filter.value)
-    if (my !== seq) return
-    seen.remember(r.items)
-    result.value = r
-    state.value = 'ready'
-  } catch {
-    if (my !== seq) return
-    state.value = 'error'
-  }
-}
-
-watch(
-  () => (route.name === 'blog-home' ? route.fullPath : null),
-  (v) => v && load(),
-  { immediate: true },
+const { state, result, reload: load } = usePublicList(
+  () => (route.name === 'blog-home' ? filter.value : null),
+  { onLoaded: (r) => seen.remember(r.items) },
 )
+document.title = 'TeamWork 技术博客'
 
 const go = (f) => router.push({ name: 'blog-home', query: toRouteQuery(f) })
 const pickCategory = (c) => go(withCategory(filter.value, c.id))
