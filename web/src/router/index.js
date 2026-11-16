@@ -11,7 +11,9 @@ const routes = [
   {
     path: '/',
     component: PublicLayout,
-    children: [],
+    children: [
+      { path: '', name: 'blog-home', component: () => import('@/views/public/BlogHome.vue') },
+    ],
   },
 ]
 
