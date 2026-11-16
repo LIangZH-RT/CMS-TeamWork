@@ -1127,10 +1127,10 @@ paths:
       tags:
       - PUBLIC
       summary: 已发布文章列表
-      description: '仅返回已发布文章的白名单字段；未知参数（如 status）忽略。按 published_at 降序。
+      description: '仅返回已发布文章的白名单字段；未知参数（如 status）忽略。按 published_at 降序。with_facets=true 时附带全部已发布文章引用的分类与标签（不受筛选影响）。
 
 
-        覆盖需求：FR-PUBLIC-001、BR-ISO-004、BR-SEARCH-005'
+        覆盖需求：FR-PUBLIC-001、BR-ISO-004、BR-SEARCH-005、BR-TAX-003'
       security: []
       operationId: listPublicArticles
       parameters:
@@ -1138,6 +1138,12 @@ paths:
       - $ref: '#/components/parameters/PageSize'
       - $ref: '#/components/parameters/CategoryFilter'
       - $ref: '#/components/parameters/TagIdsFilter'
+      - name: with_facets
+        in: query
+        schema:
+          type: boolean
+          default: false
+        description: 【补充】为 true 时返回 data.facets
       responses:
         '200':
           description: 成功
@@ -1149,16 +1155,7 @@ paths:
                 - type: object
                   properties:
                     data:
-                      allOf:
-                      - $ref: '#/components/schemas/PageMeta'
-                      - type: object
-                        required:
-                        - items
-                        properties:
-                          items:
-                            type: array
-                            items:
-                              $ref: '#/components/schemas/PublicArticleListItem'
+                      $ref: '#/components/schemas/PublicArticlePage'
         '400':
           $ref: '#/components/responses/BadRequest'
   /api/public/articles/{id}:
@@ -2143,6 +2140,39 @@ components:
         published_at:
           type: string
           format: date-time
+    PublicFacets:
+      type: object
+      nullable: true
+      required:
+      - categories
+      - tags
+      description: 【补充】全部已发布文章引用的分类与标签，按 id 升序；与本次筛选、分页无关
+      properties:
+        categories:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaxonomyBrief'
+        tags:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaxonomyBrief'
+    PublicArticlePage:
+      allOf:
+      - $ref: '#/components/schemas/PageMeta'
+      - type: object
+        required:
+        - items
+        - facets
+        properties:
+          items:
+            type: array
+            items:
+              $ref: '#/components/schemas/PublicArticleListItem'
+          facets:
+            allOf:
+            - $ref: '#/components/schemas/PublicFacets'
+            nullable: true
+            description: with_facets=true 时返回，否则为 null
     PublicArticleDetail:
       allOf:
       - $ref: '#/components/schemas/PublicArticleListItem'
