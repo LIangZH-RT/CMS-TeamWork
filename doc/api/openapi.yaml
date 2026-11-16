@@ -1127,7 +1127,7 @@ paths:
       tags:
       - PUBLIC
       summary: 已发布文章列表
-      description: '仅返回已发布文章的白名单字段；未知参数（如 status）忽略。按 published_at 降序。with_facets=true 时附带全部已发布文章引用的分类与标签（不受筛选影响）。
+      description: '仅返回已发布文章的白名单字段；未知参数（如 status）忽略。按 published_at 降序。可按关键字 q 匹配标题或摘要（范围延伸）。with_facets=true 时附带全部已发布文章引用的分类与标签（不受筛选影响）。
 
 
         覆盖需求：FR-PUBLIC-001、BR-ISO-004、BR-SEARCH-005、BR-TAX-003'
@@ -1138,6 +1138,12 @@ paths:
       - $ref: '#/components/parameters/PageSize'
       - $ref: '#/components/parameters/CategoryFilter'
       - $ref: '#/components/parameters/TagIdsFilter'
+      - name: q
+        in: query
+        schema:
+          type: string
+          maxLength: 100
+        description: 【补充·范围延伸】关键字：去首尾空白后匹配标题或摘要（LIKE 子串，\ % _ 按字面转义）；不匹配正文；空串视为未传
       - name: with_facets
         in: query
         schema:
