@@ -204,10 +204,11 @@ web/
 ├── src/
 │   ├── api/          每域一个模块；统一的 axios 实例（携带 Cookie 与 CSRF 头、统一处理 404）
 │   ├── router/       路由表 + 全局前置守卫
-│   ├── stores/       session store（当前用户、角色）
+│   ├── stores/       session store（当前用户、角色，F）；taxonomy（前台分类 / 标签导航，来自公开列表 facets）
+│   ├── composables/  组合式函数（如前台列表加载 usePublicList）
 │   ├── layouts/      PublicLayout（博客前台）；AdminLayout（后台，F/G）
 │   ├── views/
-│   │   ├── public/       博客前台：首页列表、文章详情、统一 404（匿名只读）
+│   │   ├── public/       博客前台：首页、分类页、搜索页、文章详情、统一 404（匿名只读）
 │   │   ├── auth/         登录、注册
 │   │   ├── article/      编辑视角：我的文章列表、编辑页、详情、留痕
 │   │   ├── review/       管理员视角：审核队列、通过、驳回、下架
