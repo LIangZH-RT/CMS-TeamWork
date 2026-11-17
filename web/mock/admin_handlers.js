@@ -137,7 +137,7 @@ export function listArticlesAdmin(sp) {
 
 /** GET /api/articles/counts (#32) */
 export function getCounts(sp) {
-  const rows = articles.map((a) => ({ a, s: currentStatus(a.id) }))
+  let rows = articles.map((a) => ({ a, s: currentStatus(a.id) }))
   const title = (sp.get('title') ?? '').trim()
   const catRaw = sp.get('category_id')
   if (catRaw) rows = rows.filter(({ a }) => a.category_id === Number(catRaw))
