@@ -10,7 +10,24 @@ import { isId } from '@/utils/query'
 // - /admin/**        编辑与管理员后台（F / G 实现，使用独立 AdminLayout，不挂在 PublicLayout 下）
 // 预留分区在对应页面合入前不注册路由，访问时落到前台统一 404。
 // 守卫只做体验，不承担任何权限职责（architecture §3.3）。
+import AdminLayout from '@/layouts/AdminLayout.vue'
+
 const routes = [
+  {
+    path: '/admin',
+    component: AdminLayout,
+    meta: { requiresAdmin: true },
+    children: [
+      { path: '', redirect: { name: 'admin-reviews' } },
+      { path: 'reviews', name: 'admin-reviews', component: () => import('@/views/admin/ReviewQueue.vue'), meta: { title: '审核队列' } },
+      { path: 'reviews/:id', name: 'admin-review-detail', component: () => import('@/views/admin/ReviewDetail.vue'), meta: { title: '审核详情' } },
+      { path: 'articles', name: 'admin-articles', component: () => import('@/views/admin/ArticleList.vue'), meta: { title: '全部文章' } },
+      { path: 'articles/:id', name: 'admin-article-detail', component: () => import('@/views/admin/ArticleDetail.vue'), meta: { title: '文章详情' } },
+      { path: 'articles/:id/audit-logs', name: 'admin-audit-logs', component: () => import('@/views/admin/AuditLogs.vue'), meta: { title: '留痕' } },
+      { path: 'categories', name: 'admin-categories', component: () => import('@/views/admin/CategoryManage.vue'), meta: { title: '分类管理' } },
+      { path: 'tags', name: 'admin-tags', component: () => import('@/views/admin/TagManage.vue'), meta: { title: '标签管理' } },
+    ],
+  },
   {
     path: '/',
     component: PublicLayout,
