@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 // 标签管理（api-spec §4.18）。支持关键字搜索 + 分页。
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
@@ -14,10 +14,10 @@ async function load() {
   loading.value = true
   try {
     const res = await listTags(query)
-    rows.value = res.data.items
-    total.value = res.data.total
+    rows.value = res.items
+    total.value = res.total
   } catch (e) {
-    ElMessage.error(e?.data?.message || '加载标签失败')
+    ElMessage.error(e?.message || '加载标签失败')
   } finally {
     loading.value = false
   }
@@ -44,8 +44,8 @@ async function submit() {
     dialog.value.open = false
     await load()
   } catch (e) {
-    if (e?.data?.code === 40902) ElMessage.error('标签名已存在')
-    else ElMessage.error(e?.data?.message || '操作失败')
+    if (e?.code === 40902) ElMessage.error('标签名已存在')
+    else ElMessage.error(e?.message || '操作失败')
   } finally {
     dialog.value.submitting = false
   }
@@ -68,8 +68,8 @@ async function onDelete(r) {
     ElMessage.success('已删除')
     await load()
   } catch (e) {
-    if (e?.data?.code === 40903) ElMessage.error(e?.data?.message || '标签被文章引用，无法删除')
-    else ElMessage.error(e?.data?.message || '删除失败')
+    if (e?.code === 40903) ElMessage.error(e?.message || '标签被文章引用，无法删除')
+    else ElMessage.error(e?.message || '删除失败')
   }
 }
 </script>

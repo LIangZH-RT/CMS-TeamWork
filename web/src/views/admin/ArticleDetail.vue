@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 // 管理员视角文章详情。只读正文，可下架（只有 PUBLISHED 状态允许）。
 // 审核动作（通过/驳回）走审核详情页 ReviewDetail。
 import { computed, onMounted, ref } from 'vue'
@@ -20,13 +20,13 @@ async function load() {
   loading.value = true
   try {
     const res = await getArticleDetail(articleId)
-    article.value = res.data
+    article.value = res  // http.js 已解包
   } catch (e) {
-    if (e?.data?.code === 40400) {
+    if (e?.code === 40400) {
       ElMessage.error('文章不存在')
       router.replace({ name: 'admin-articles' })
     } else {
-      ElMessage.error(e?.data?.message || '加载失败')
+      ElMessage.error(e?.message || '加载失败')
     }
   } finally {
     loading.value = false
@@ -55,7 +55,7 @@ async function onUnpublish() {
     await load()
   } catch (e) {
     if (e === 'cancel') return
-    ElMessage.error(e?.data?.message || '下架失败')
+    ElMessage.error(e?.message || '下架失败')
   }
 }
 

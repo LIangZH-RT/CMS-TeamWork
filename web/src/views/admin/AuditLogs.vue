@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 // 留痕页面（api-spec #19）。按 operated_at 正序展示。
 // admin_handlers 追加的 auditLogs 包含 CREATE / EDIT / SUBMIT / REJECT / APPROVE / UNPUBLISH 六种动作。
 import { onMounted, ref } from 'vue'
@@ -29,7 +29,7 @@ async function load() {
     const res = await getAuditLogs(articleId)
     logs.value = res.data
   } catch (e) {
-    ElMessage.error(e?.data?.message || '加载留痕失败')
+    ElMessage.error(e?.message || '加载留痕失败')
   } finally {
     loading.value = false
   }

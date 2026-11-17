@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 // 全量文章列表（api-spec #6 管理员视角）。
 // 6 状态 Tab 切换，默认按 updated_at 降序。管理员在此列表可执行下架动作。
 import { computed, onMounted, reactive, ref } from 'vue'
@@ -23,10 +23,10 @@ async function load() {
   loading.value = true
   try {
     const res = await listArticles(query)
-    rows.value = res.data.items
-    total.value = res.data.total
+    rows.value = res.items
+    total.value = res.total
   } catch (e) {
-    ElMessage.error(e?.data?.message || '加载失败')
+    ElMessage.error(e?.message || '加载失败')
   } finally {
     loading.value = false
   }
@@ -57,8 +57,8 @@ async function onUnpublish(row) {
     await load()
   } catch (e) {
     if (e === 'cancel') return
-    if (e?.data?.code === 40901) ElMessage.error(e?.data?.message || '文章状态已变更，无法下架')
-    else ElMessage.error(e?.data?.message || '下架失败')
+    if (e?.code === 40901) ElMessage.error(e?.message || '文章状态已变更，无法下架')
+    else ElMessage.error(e?.message || '下架失败')
   }
 }
 </script>

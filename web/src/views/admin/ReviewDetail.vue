@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 // 审核详情（api-spec §4.5 #15 / §4.12 #16-17）。
 // 管理员**只读正文**，不能编辑内容（INV-03）。审核动作只有通过 / 驳回，都需要 submission_id。
 import { computed, onMounted, reactive, ref } from 'vue'
@@ -22,14 +22,14 @@ async function load() {
   loading.value = true
   try {
     const [a, s] = await Promise.all([getArticleDetail(articleId), getReviewStandard()])
-    article.value = a.data
-    standard.value = s.data
+    article.value = a  // http.js 已解包，直接是接口 data 字段
+    standard.value = s
   } catch (e) {
-    if (e?.data?.code === 40400) {
+    if (e?.code === 40400) {
       ElMessage.error('文章不存在或已被处理')
       router.replace({ name: 'admin-reviews' })
     } else {
-      ElMessage.error(e?.data?.message || '加载失败')
+      ElMessage.error(e?.message || '加载失败')
     }
   } finally {
     loading.value = false
@@ -53,8 +53,8 @@ async function doApprove() {
     ElMessage.success('已通过，文章将进入发布队列')
     router.push({ name: 'admin-reviews' })
   } catch (e) {
-    if (e?.data?.code === 40901) ElMessage.error(e?.data?.message || '文章状态已变更')
-    else ElMessage.error(e?.data?.message || '操作失败')
+    if (e?.code === 40901) ElMessage.error(e?.message || '文章状态已变更')
+    else ElMessage.error(e?.message || '操作失败')
   }
 }
 
@@ -76,8 +76,8 @@ async function doReject() {
     rejectDialog.open = false
     router.push({ name: 'admin-reviews' })
   } catch (e) {
-    if (e?.data?.code === 40901) ElMessage.error(e?.data?.message || '文章状态已变更')
-    else ElMessage.error(e?.data?.message || '操作失败')
+    if (e?.code === 40901) ElMessage.error(e?.message || '文章状态已变更')
+    else ElMessage.error(e?.message || '操作失败')
   } finally {
     rejectDialog.submitting = false
   }

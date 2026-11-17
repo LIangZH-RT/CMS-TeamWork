@@ -18,11 +18,12 @@ async function load() {
   loading.value = true
   try {
     const [q, c] = await Promise.all([getReviewQueue(query), getArticleCounts()])
-    rows.value = q.data.items
-    total.value = q.data.total
-    counts.value = c.data
+    // http.js unwrap 已自动解包 {code,message,data} → 这里直接是接口 data 字段
+    rows.value = q.items
+    total.value = q.total
+    counts.value = c
   } catch (e) {
-    ElMessage.error(e?.data?.message || '加载审核队列失败')
+    ElMessage.error(e?.message || '加载审核队列失败')
   } finally {
     loading.value = false
   }

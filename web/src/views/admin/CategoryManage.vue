@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 // 分类管理（api-spec §4.17）。G 负责。
 // 校验策略：长度/空白前端只做最小防御（去首尾空白、非空），真正的重名/引用校验让后端返回 409。
 import { onMounted, ref } from 'vue'
@@ -13,9 +13,9 @@ async function load() {
   loading.value = true
   try {
     const res = await listCategories()
-    rows.value = res.data // { id, name, in_use }
+    rows.value = res // { id, name, in_use }
   } catch (e) {
-    ElMessage.error(e?.data?.message || '加载分类失败')
+    ElMessage.error(e?.message || '加载分类失败')
   } finally {
     loading.value = false
   }
@@ -47,9 +47,9 @@ async function submit() {
     dialog.value.open = false
     await load()
   } catch (e) {
-    const code = e?.data?.code
+    const code = e?.code
     if (code === 40902) ElMessage.error('分类名已存在')
-    else ElMessage.error(e?.data?.message || '操作失败')
+    else ElMessage.error(e?.message || '操作失败')
   } finally {
     dialog.value.submitting = false
   }
@@ -72,9 +72,9 @@ async function onDelete(r) {
     ElMessage.success('已删除')
     await load()
   } catch (e) {
-    const code = e?.data?.code
-    if (code === 40903) ElMessage.error(e?.data?.message || '分类下还有文章，无法删除')
-    else ElMessage.error(e?.data?.message || '删除失败')
+    const code = e?.code
+    if (code === 40903) ElMessage.error(e?.message || '分类下还有文章，无法删除')
+    else ElMessage.error(e?.message || '删除失败')
   }
 }
 </script>
