@@ -25,3 +25,25 @@ describe('筛选 ↔ URL', () => {
     expect(hasFilter({ category_id: null, tag_ids: [] })).toBe(false)
   })
 })
+
+describe('搜索参数', () => {
+  it('q 去首尾空白、空串视为未传、超长按码点截断', async () => {
+    const { normalizeKeyword, parseSearchQuery, toSearchRouteQuery } = await import('./query')
+    expect(normalizeKeyword('  JVM  ')).toBe('JVM')
+    expect(normalizeKeyword(['a', 'b'])).toBe('a')
+    expect(normalizeKeyword(undefined)).toBe('')
+    expect([...normalizeKeyword('😀'.repeat(120))]).toHaveLength(100)
+    expect(parseSearchQuery({ q: ' x ', tag_ids: ['3'], page: '2', status: 'DRAFT' })).toEqual({ q: 'x', page: 2, category_id: null, tag_ids: ['3'] })
+    expect(toSearchRouteQuery({ q: '  ', page: 1, tag_ids: [] })).toEqual({})
+    expect(toSearchRouteQuery({ q: '100%', page: 2, tag_ids: ['1'] })).toEqual({ q: '100%', tag_ids: ['1'], page: '2' })
+  })
+  it('高亮只切纯文本片段，% _ 按字面', async () => {
+    const { splitHighlight } = await import('./query')
+    expect(splitHighlight('JVM 与 jvm', 'jvm')).toEqual([
+      { text: 'JVM', hit: true }, { text: ' 与 ', hit: false }, { text: 'jvm', hit: true },
+    ])
+    expect(splitHighlight('a_b axb', '_').filter((s) => s.hit).map((s) => s.text)).toEqual(['_'])
+    expect(splitHighlight('<b>x</b>', 'x')).toEqual([{ text: '<b>', hit: false }, { text: 'x', hit: true }, { text: '</b>', hit: false }])
+    expect(splitHighlight('abc', '')).toEqual([{ text: 'abc', hit: false }])
+  })
+})

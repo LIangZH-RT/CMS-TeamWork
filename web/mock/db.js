@@ -1,6 +1,6 @@
 // 契约 mock 的内存数据：模拟「库表」而不是「接口响应」。
 // 故意带上状态、作者、驳回意见、预定时间等内部字段，用来验证接口层只输出 §8.2 白名单。
-// 分类 7「测试」没有任何已发布文章：前台不应从文章数据里「拼出」完整分类导航。
+// 分类 7「测试」、标签 15「Rust」只被未发布文章引用：facets 不应出现它们（api-spec §4.14 PublicFacets）。
 
 export const categories = [
   { id: 1, name: '后端' },
@@ -27,6 +27,7 @@ export const tags = [
   { id: 12, name: '微服务' },
   { id: 13, name: 'LLM' },
   { id: 14, name: 'RAG' },
+  { id: 15, name: 'Rust' },
 ]
 
 // 媒体：kind 决定 mock 生成什么字节；article_id 为归属文章
@@ -140,9 +141,11 @@ export const articles = [
   { id: 111, title: '微服务拆分的反模式：分布式单体', excerpt: '服务拆得越多，发布反而越慢？识别分布式单体的五个信号。', category_id: 5, tag_ids: [12, 1], cover_media_id: 4011, audio_media_id: null, published_at: '2026-08-01T09:00:00+08:00', status: 'PUBLISHED', author_id: 14, content: short('分布式单体') },
   { id: 112, title: 'JVM 调优参数清单（Java 21）', excerpt: 'G1 与 ZGC 的常用参数及适用场景。', category_id: 1, tag_ids: [1, 10], cover_media_id: null, audio_media_id: null, published_at: '2026-07-21T19:00:00+08:00', status: 'PUBLISHED', author_id: 11, content: short('JVM 参数') },
   { id: 113, title: 'Docker 镜像瘦身实践', excerpt: '多阶段构建、distroless 与层缓存，把镜像从 1.2GB 压到 180MB。', category_id: 4, tag_ids: [8, 9], cover_media_id: 4013, audio_media_id: null, published_at: '2026-07-02T13:00:00+08:00', status: 'PUBLISHED', author_id: 14, content: short('镜像瘦身') },
+  // 114：标题 / 摘要含 LIKE 通配符 % 与 _，用来验证搜索 q 按字面匹配（api-spec §11.1）
+  { id: 114, title: 'SQL 里 LIKE 的 % 与 _ 通配符陷阱', excerpt: '按 user_name 搜索时，下划线也会匹配任意单个字符；命中率 100% 不一定是好事。', category_id: 3, tag_ids: [5], cover_media_id: null, audio_media_id: null, published_at: '2026-06-15T10:00:00+08:00', status: 'PUBLISHED', author_id: 13, content: short('LIKE 通配符') },
   { id: 199, title: '【Mock】前台渲染安全自检', excerpt: '仅存在于前端契约 mock，用来检查危险链接、外部图片与视频内嵌规则。', category_id: 5, tag_ids: [], cover_media_id: null, audio_media_id: null, published_at: '2026-06-01T09:00:00+08:00', status: 'PUBLISHED', author_id: 11, content: ARTICLE_199 },
   // 以下五种非已发布状态：列表不出现，详情与媒体一律 404
-  { id: 120, title: '草稿：尚未提交的文章', excerpt: '', category_id: 1, tag_ids: [1], cover_media_id: 4020, audio_media_id: null, published_at: null, status: 'DRAFT', author_id: 11, content: '草稿' },
+  { id: 120, title: '草稿：尚未提交的文章', excerpt: '', category_id: 7, tag_ids: [1, 15], cover_media_id: 4020, audio_media_id: null, published_at: null, status: 'DRAFT', author_id: 11, content: '草稿' },
   { id: 121, title: '待审核的文章', excerpt: '', category_id: 1, tag_ids: [1], cover_media_id: null, audio_media_id: null, published_at: null, status: 'PENDING_REVIEW', author_id: 12, content: '待审' },
   { id: 122, title: '被驳回的文章', excerpt: '', category_id: 2, tag_ids: [3], cover_media_id: null, audio_media_id: null, published_at: null, status: 'REJECTED', author_id: 12, reject_reason: '内容不完整', content: '驳回' },
   { id: 123, title: '待发布的文章', excerpt: '', category_id: 2, tag_ids: [3], cover_media_id: null, audio_media_id: null, published_at: null, scheduled_publish_time: '2026-12-01T09:00:00+08:00', status: 'SCHEDULED', author_id: 13, content: '待发布' },

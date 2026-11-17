@@ -3,11 +3,13 @@
 // 卡片本身不是一个大链接（避免链接里嵌按钮），标题和封面各自是链接。
 import { ref } from 'vue'
 import { fmtDate } from '@/utils/format'
+import { splitHighlight } from '@/utils/query'
 
 const props = defineProps({
   article: { type: Object, required: true },
   activeCategory: { type: String, default: null },
   activeTags: { type: Array, default: () => [] },
+  highlight: { type: String, default: '' }, // 搜索关键字：标题、摘要里的命中段用 <mark> 标出（纯文本渲染）
 })
 const emit = defineEmits(['pick-category', 'toggle-tag'])
 const coverBroken = ref(false)
@@ -34,8 +36,12 @@ const to = `/posts/${props.article.id}`
         </button>
         <time :datetime="article.published_at">{{ fmtDate(article.published_at) }}</time>
       </div>
-      <h3><router-link :to="to">{{ article.title }}</router-link></h3>
-      <p v-if="article.excerpt" class="excerpt">{{ article.excerpt }}</p>
+      <h3>
+        <router-link :to="to"><template v-for="(s, i) in splitHighlight(article.title, highlight)" :key="i"><mark v-if="s.hit">{{ s.text }}</mark><template v-else>{{ s.text }}</template></template></router-link>
+      </h3>
+      <p v-if="article.excerpt" class="excerpt">
+        <template v-for="(s, i) in splitHighlight(article.excerpt, highlight)" :key="i"><mark v-if="s.hit">{{ s.text }}</mark><template v-else>{{ s.text }}</template></template>
+      </p>
       <div v-if="article.tags.length" class="tags">
         <button
           v-for="t in article.tags"
@@ -64,5 +70,6 @@ const to = `/posts/${props.article.id}`
 h3 { font-family: var(--serif); font-size: 18px; line-height: 1.45; margin: 2px 0 0; }
 h3 a:hover { color: var(--accent); }
 .excerpt { font-size: 13px; color: #6b6458; line-height: 1.7; margin: 0; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+mark { background: #fde7d6; color: inherit; border-radius: 3px; padding: 0 1px; }
 .tags { display: flex; flex-wrap: wrap; gap: 6px; }
 </style>
