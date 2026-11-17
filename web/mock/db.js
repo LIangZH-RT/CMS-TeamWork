@@ -151,3 +151,78 @@ export const articles = [
   { id: 123, title: '待发布的文章', excerpt: '', category_id: 2, tag_ids: [3], cover_media_id: null, audio_media_id: null, published_at: null, scheduled_publish_time: '2026-12-01T09:00:00+08:00', status: 'SCHEDULED', author_id: 13, content: '待发布' },
   { id: 124, title: '已下架的文章', excerpt: '', category_id: 1, tag_ids: [1, 10], cover_media_id: null, audio_media_id: null, published_at: '2026-10-01T09:00:00+08:00', status: 'UNPUBLISHED', author_id: 11, unpublish_reason: '涉及敏感信息', content: '下架' },
 ]
+
+// ─── 管理员端补充数据（供 admin mock handlers 使用，不影响公开接口） ───
+
+// 用户表：只有 id / username / role，敏感字段（密码哈希等）不进 mock
+export const authors = [
+  { id: 1, username: 'admin', role: 'ADMIN' },
+  { id: 11, username: 'zhangsan', role: 'EDITOR' },
+  { id: 12, username: 'lisi', role: 'EDITOR' },
+  { id: 13, username: 'wangwu', role: 'EDITOR' },
+  { id: 14, username: 'zhaoliu', role: 'EDITOR' },
+  { id: 15, username: 'sunqi', role: 'EDITOR' },
+]
+
+// 审核标准：服务端配置项（api-spec #14 标准版本 + 驳回类别字典）
+export const review_standard = {
+  version: 'v1.0',
+  updated_at: '2026-10-15T09:00:00+08:00',
+  categories: [
+    { code: 'INCOMPLETE', name: '内容不完整' },
+    { code: 'LOW_QUALITY', name: '质量不达标' },
+    { code: 'INCORRECT', name: '事实错误' },
+    { code: 'PLAGIARISM', name: '涉嫌抄袭' },
+    { code: 'OFF_TOPIC', name: '选题偏离' },
+    { code: 'OTHER', name: '其他' },
+  ],
+}
+
+// 给文章补 admin 端需要的时间戳与审核字段
+const ADMIN_FIELDS = {
+  101: { created_at: '2026-09-10T08:00:00+08:00', updated_at: '2026-11-06T22:00:00+08:00' },
+  102: { created_at: '2026-10-15T10:00:00+08:00', updated_at: '2026-11-04T15:00:00+08:00' },
+  103: { created_at: '2026-10-20T14:00:00+08:00', updated_at: '2026-11-02T20:15:00+08:00' },
+  104: { created_at: '2026-09-28T09:00:00+08:00', updated_at: '2026-11-01T14:00:00+08:00' },
+  105: { created_at: '2026-10-01T11:00:00+08:00', updated_at: '2026-10-23T11:00:00+08:00' },
+  106: { created_at: '2026-09-12T16:00:00+08:00', updated_at: '2026-09-29T16:40:00+08:00' },
+  107: { created_at: '2026-09-05T08:00:00+08:00', updated_at: '2026-09-19T08:30:00+08:00' },
+  108: { created_at: '2026-08-20T10:00:00+08:00', updated_at: '2026-09-17T15:20:00+08:00' },
+  109: { created_at: '2026-10-01T09:00:00+08:00', updated_at: '2026-11-08T21:05:00+08:00' },
+  110: { created_at: '2026-07-15T09:00:00+08:00', updated_at: '2026-08-11T10:00:00+08:00' },
+  111: { created_at: '2026-07-20T09:00:00+08:00', updated_at: '2026-07-31T09:00:00+08:00' },
+  112: { created_at: '2026-06-15T19:00:00+08:00', updated_at: '2026-07-20T19:00:00+08:00' },
+  113: { created_at: '2026-06-01T13:00:00+08:00', updated_at: '2026-07-01T13:00:00+08:00' },
+  114: { created_at: '2026-06-01T10:00:00+08:00', updated_at: '2026-06-14T10:00:00+08:00' },
+  199: { created_at: '2026-05-01T09:00:00+08:00', updated_at: '2026-05-31T09:00:00+08:00' },
+  120: { created_at: '2026-11-01T10:00:00+08:00', updated_at: '2026-11-10T10:00:00+08:00' },
+  121: { created_at: '2026-11-10T08:00:00+08:00', updated_at: '2026-11-15T08:00:00+08:00', submitted_at: '2026-11-15T08:00:00+08:00', current_submission_id: 1001 },
+  122: { created_at: '2026-10-20T09:00:00+08:00', updated_at: '2026-11-12T10:00:00+08:00', submitted_at: '2026-11-08T09:00:00+08:00', current_submission_id: 1002 },
+  123: { created_at: '2026-10-15T09:00:00+08:00', updated_at: '2026-11-14T09:00:00+08:00' },
+  124: { created_at: '2026-09-01T09:00:00+08:00', updated_at: '2026-10-01T10:00:00+08:00' },
+}
+
+export function getAdminArticleFields(id) {
+  return ADMIN_FIELDS[id] || {}
+}
+
+// 留痕（audit_log）：按 operated_at 升序返回（api-spec §4.21）
+export const audit_logs = [
+  // article 109 的留痕示例：多轮审核 + 下架 + 恢复
+  { id: 1, article_id: 109, operator_id: 12, operator_role: 'EDITOR', action: 'CREATE', detail: {}, operated_at: '2026-10-01T09:00:00+08:00' },
+  { id: 2, article_id: 109, operator_id: 12, operator_role: 'EDITOR', action: 'EDIT', detail: { field: 'title', before: 'JVM Full GC 排查', after: '一次 JVM Full GC 告警的排查全过程' }, operated_at: '2026-10-03T14:00:00+08:00' },
+  { id: 3, article_id: 109, operator_id: 12, operator_role: 'EDITOR', action: 'SUBMIT', detail: { submission_id: 901, round: 1 }, operated_at: '2026-10-15T10:00:00+08:00' },
+  { id: 4, article_id: 109, operator_id: 1, operator_role: 'ADMIN', action: 'REJECT', detail: { submission_id: 901, reason_category: 'OTHER', reason_comment: '缺少堆转储截图' }, operated_at: '2026-10-16T11:00:00+08:00' },
+  { id: 5, article_id: 109, operator_id: 12, operator_role: 'EDITOR', action: 'SUBMIT', detail: { submission_id: 902, round: 2 }, operated_at: '2026-11-01T09:00:00+08:00' },
+  { id: 6, article_id: 109, operator_id: 1, operator_role: 'ADMIN', action: 'APPROVE', detail: { submission_id: 902 }, operated_at: '2026-11-05T15:00:00+08:00' },
+  { id: 7, article_id: 109, operator_id: 1, operator_role: 'ADMIN', action: 'UNPUBLISH', detail: { reason: '临时下架补充数据' }, operated_at: '2026-11-09T20:00:00+08:00' },
+  { id: 8, article_id: 109, operator_id: 12, operator_role: 'EDITOR', action: 'SUBMIT', detail: { submission_id: 903, round: 3 }, operated_at: '2026-11-09T21:00:00+08:00' },
+  { id: 9, article_id: 109, operator_id: 1, operator_role: 'ADMIN', action: 'APPROVE', detail: { submission_id: 903 }, operated_at: '2026-11-09T21:05:00+08:00' },
+  // article 121 的留痕（待审核）
+  { id: 10, article_id: 121, operator_id: 12, operator_role: 'EDITOR', action: 'CREATE', detail: {}, operated_at: '2026-11-10T08:00:00+08:00' },
+  { id: 11, article_id: 121, operator_id: 12, operator_role: 'EDITOR', action: 'SUBMIT', detail: { submission_id: 1001, round: 1 }, operated_at: '2026-11-15T08:00:00+08:00' },
+  // article 122 的留痕（被驳回）
+  { id: 12, article_id: 122, operator_id: 12, operator_role: 'EDITOR', action: 'CREATE', detail: {}, operated_at: '2026-10-20T09:00:00+08:00' },
+  { id: 13, article_id: 122, operator_id: 12, operator_role: 'EDITOR', action: 'SUBMIT', detail: { submission_id: 1002, round: 1 }, operated_at: '2026-11-08T09:00:00+08:00' },
+  { id: 14, article_id: 122, operator_id: 1, operator_role: 'ADMIN', action: 'REJECT', detail: { submission_id: 1002, reason_category: 'INCOMPLETE', reason_comment: '内容不完整' }, operated_at: '2026-11-12T10:00:00+08:00' },
+]
