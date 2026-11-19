@@ -40,6 +40,25 @@ onMounted(load)
 /** 只有 PENDING_REVIEW 才能审核（状态闸） */
 const canReview = computed(() => article.value?.status === 'PENDING_REVIEW')
 
+/**
+ * 审核动作的 409（api-spec §3.3）：
+ * - 40900 STATE_CONFLICT：文章已不是待审核（被别人处理过）→ 提示后回队列
+ * - 40901 SUBMISSION_STALE：编辑已重新提交，页面内容过期 → 提示后刷新详情
+ */
+function handleReviewConflict(e) {
+  if (e?.code === 40900) {
+    ElMessage.error('文章状态已变更，已返回审核队列')
+    rejectDialog.open = false
+    router.push({ name: 'admin-reviews' })
+  } else if (e?.code === 40901) {
+    ElMessage.warning('编辑已重新提交，已刷新为最新内容，请重新审核')
+    rejectDialog.open = false
+    load()
+  } else {
+    ElMessage.error(e?.message || '操作失败')
+  }
+}
+
 async function doApprove() {
   try {
     await ElMessageBox.confirm(
@@ -53,8 +72,7 @@ async function doApprove() {
     ElMessage.success('已通过，文章将进入发布队列')
     router.push({ name: 'admin-reviews' })
   } catch (e) {
-    if (e?.code === 40901) ElMessage.error(e?.message || '文章状态已变更')
-    else ElMessage.error(e?.message || '操作失败')
+    handleReviewConflict(e)
   }
 }
 
@@ -76,8 +94,7 @@ async function doReject() {
     rejectDialog.open = false
     router.push({ name: 'admin-reviews' })
   } catch (e) {
-    if (e?.code === 40901) ElMessage.error(e?.message || '文章状态已变更')
-    else ElMessage.error(e?.message || '操作失败')
+    handleReviewConflict(e)
   } finally {
     rejectDialog.submitting = false
   }

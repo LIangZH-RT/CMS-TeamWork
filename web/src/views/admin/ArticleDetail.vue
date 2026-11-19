@@ -55,7 +55,10 @@ async function onUnpublish() {
     await load()
   } catch (e) {
     if (e === 'cancel') return
-    ElMessage.error(e?.message || '下架失败')
+    if (e?.code === 40900) {
+      ElMessage.error('文章状态已变更，无法下架')
+      await load()
+    } else ElMessage.error(e?.message || '下架失败')
   }
 }
 

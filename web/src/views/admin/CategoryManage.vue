@@ -48,7 +48,7 @@ async function submit() {
     await load()
   } catch (e) {
     const code = e?.code
-    if (code === 40902) ElMessage.error('分类名已存在')
+    if (code === 40906) ElMessage.error('分类名已存在')
     else ElMessage.error(e?.message || '操作失败')
   } finally {
     dialog.value.submitting = false
@@ -73,7 +73,7 @@ async function onDelete(r) {
     await load()
   } catch (e) {
     const code = e?.code
-    if (code === 40903) ElMessage.error(e?.message || '分类下还有文章，无法删除')
+    if (code === 40904) ElMessage.error(e?.message || '分类下还有文章，无法删除')
     else ElMessage.error(e?.message || '删除失败')
   }
 }

@@ -202,7 +202,7 @@ export function getStandard() {
   return ok(review_standard)
 }
 
-/** 审核通过 / 驳回：状态闸（api-spec §3.3 状态闸 409） */
+/** 审核通过 / 驳回：状态闸（api-spec §3.3：40900 STATE_CONFLICT） */
 // 失败一律以 { error } 返回，调用方 `if (g.error) return g.error`
 function reviewGuard(id) {
   if (!ID_RE.test(id)) return { error: notFound() }
@@ -210,7 +210,7 @@ function reviewGuard(id) {
   if (!a) return { error: notFound() }
   const st = currentStatus(a.id)
   if (st !== 'PENDING_REVIEW') {
-    return { error: conflict(40901, `状态为 ${st}，无法进行审核操作`, { current_status: st, allowed_statuses: ['PENDING_REVIEW'] }) }
+    return { error: conflict(40900, '当前状态不允许此操作') }
   }
   return { a }
 }
@@ -252,7 +252,7 @@ export function unpublish(id, body) {
   if (!a) return notFound()
   const st = currentStatus(a.id)
   if (st !== 'PUBLISHED') {
-    return conflict(40901, `状态为 ${st}，无法下架`, { current_status: st })
+    return conflict(40900, '当前状态不允许此操作')
   }
   if (!body?.reason || !body.reason.trim()) return badRequest('reason', '下架原因必填')
   setStatus(a.id, 'UNPUBLISHED')
@@ -280,7 +280,7 @@ export function createCategory(body) {
   const name = body?.name?.trim()
   if (!name) return badRequest('name', '必填')
   if ([...adminState.categories.values()].some((c) => c.name.toLowerCase() === name.toLowerCase()))
-    return conflict(40902, '分类名已存在')
+    return conflict(40906, '分类名已存在')
   const id = adminState.nextCategoryId++
   adminState.categories.set(id, { id, name })
   return ok({ id, name })
@@ -293,7 +293,7 @@ export function renameCategory(id, body) {
   const name = body?.name?.trim()
   if (!name) return badRequest('name', '必填')
   if ([...adminState.categories.values()].some((x) => x.id !== Number(id) && x.name.toLowerCase() === name.toLowerCase()))
-    return conflict(40902, '分类名已存在')
+    return conflict(40906, '分类名已存在')
   c.name = name
   return ok({ id: c.id, name: c.name })
 }
@@ -303,7 +303,7 @@ export function deleteCategory(id) {
   const c = adminState.categories.get(Number(id))
   if (!c) return notFound()
   if (articles.some((a) => a.category_id === c.id))
-    return conflict(40903, '分类下还有文章，无法删除', { used_count: articles.filter((a) => a.category_id === c.id).length })
+    return conflict(40904, '分类被文章引用，无法删除')
   adminState.categories.delete(c.id)
   return ok({})
 }
@@ -327,7 +327,7 @@ export function createTag(body) {
   const name = body?.name?.trim()
   if (!name) return badRequest('name', '必填')
   if ([...adminState.tags.values()].some((t) => t.name.toLowerCase() === name.toLowerCase()))
-    return conflict(40902, '标签名已存在')
+    return conflict(40906, '标签名已存在')
   const id = adminState.nextTagId++
   adminState.tags.set(id, { id, name })
   return ok({ id, name })
@@ -340,7 +340,7 @@ export function renameTag(id, body) {
   const name = body?.name?.trim()
   if (!name) return badRequest('name', '必填')
   if ([...adminState.tags.values()].some((x) => x.id !== Number(id) && x.name.toLowerCase() === name.toLowerCase()))
-    return conflict(40902, '标签名已存在')
+    return conflict(40906, '标签名已存在')
   t.name = name
   return ok({ id: t.id, name: t.name })
 }
@@ -350,7 +350,7 @@ export function deleteTag(id) {
   const t = adminState.tags.get(Number(id))
   if (!t) return notFound()
   if (articles.some((a) => a.tag_ids.includes(t.id)))
-    return conflict(40903, '标签被文章引用，无法删除', { used_count: articles.filter((a) => a.tag_ids.includes(t.id)).length })
+    return conflict(40904, '标签被文章引用，无法删除')
   adminState.tags.delete(t.id)
   return ok({})
 }

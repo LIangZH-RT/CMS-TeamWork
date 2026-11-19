@@ -44,7 +44,7 @@ async function submit() {
     dialog.value.open = false
     await load()
   } catch (e) {
-    if (e?.code === 40902) ElMessage.error('标签名已存在')
+    if (e?.code === 40906) ElMessage.error('标签名已存在')
     else ElMessage.error(e?.message || '操作失败')
   } finally {
     dialog.value.submitting = false
@@ -68,7 +68,7 @@ async function onDelete(r) {
     ElMessage.success('已删除')
     await load()
   } catch (e) {
-    if (e?.code === 40903) ElMessage.error(e?.message || '标签被文章引用，无法删除')
+    if (e?.code === 40904) ElMessage.error(e?.message || '标签被文章引用，无法删除')
     else ElMessage.error(e?.message || '删除失败')
   }
 }
