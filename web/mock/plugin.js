@@ -37,7 +37,14 @@ function middleware(req, res, next) {
     res.statusCode = pubOut.status
     for (const [k, v] of Object.entries(pubOut.headers)) res.setHeader(k, v)
     res.end(req.method === 'HEAD' ? undefined : pubOut.body)
-  })()
+  })().catch((err) => {
+    // mock 自身出错时只让这一个请求返回 500，不能让未处理的 rejection 打崩 dev / preview 进程
+    console.error('[cms-contract-mock]', req.method, req.url, err)
+    if (res.headersSent) return res.end()
+    res.statusCode = 500
+    res.setHeader('Content-Type', 'application/json; charset=utf-8')
+    res.end(JSON.stringify({ code: 50000, message: '服务器内部错误', data: null }))
+  })
 }
 
 export function contractMock() {

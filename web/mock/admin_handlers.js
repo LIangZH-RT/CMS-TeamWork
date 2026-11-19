@@ -203,13 +203,14 @@ export function getStandard() {
 }
 
 /** 审核通过 / 驳回：状态闸（api-spec §3.3 状态闸 409） */
+// 失败一律以 { error } 返回，调用方 `if (g.error) return g.error`
 function reviewGuard(id) {
-  if (!ID_RE.test(id)) return notFound()
+  if (!ID_RE.test(id)) return { error: notFound() }
   const a = articles.find((x) => x.id === Number(id))
-  if (!a) return notFound()
+  if (!a) return { error: notFound() }
   const st = currentStatus(a.id)
   if (st !== 'PENDING_REVIEW') {
-    return conflict(40901, `状态为 ${st}，无法进行审核操作`, { current_status: st, allowed_statuses: ['PENDING_REVIEW'] })
+    return { error: conflict(40901, `状态为 ${st}，无法进行审核操作`, { current_status: st, allowed_statuses: ['PENDING_REVIEW'] }) }
   }
   return { a }
 }
