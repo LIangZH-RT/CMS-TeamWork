@@ -4,14 +4,16 @@
 //
 // 注意：这是内存 mock，POST/PUT/DELETE 的改动只存在于当前 Vite dev server 生命周期。
 // 真实后端实现以 api-spec 为准。
-import { articles, categories, tags, authors, audit_logs, auditLog, review_standard, getAdminArticleFields } from './db.js'
+import { articles, categories, tags, authors, media, audit_logs, auditLog, review_standard, getAdminArticleFields } from './db.js'
+import { makeCoverPng, makeDiagramPng, makeWav } from './assets.js'
 
 // 可变引用：admin 端会改分类/标签数组（新建/改名/删除），这些数组被外部 import
 // 但 db.js 导出的是 const 数组，所以用 Map 做运行态
 const adminState = {
   categories: new Map(categories.map((c) => [c.id, { ...c }])),
   tags: new Map(tags.map((t) => [t.id, { ...t }])),
-  articleStatus: new Map(), // 文章状态运行态变更（approve → PUBLISHED / reject → REJECTED / unpublish → UNPUBLISHED）
+  articleStatus: new Map(), // 文章状态运行态变更（approve → PUBLISHED/SCHEDULED / reject → REJECTED / unpublish → UNPUBLISHED）
+  publishedAt: new Map(), // 审核通过立即发布时写入的 published_at（下架后保留，§4.10）
   auditLogs: [...audit_logs],
   nextAuditId: audit_logs.reduce((m, l) => Math.max(m, l.id), 0) + 1,
   nextCategoryId: categories.reduce((m, c) => Math.max(m, c.id), 0) + 1,
@@ -56,39 +58,122 @@ const conflict = (code, message, detail) => ({
 const ID_RE = /^[1-9]\d{0,18}$/
 const authorById = new Map(authors.map((a) => [a.id, a]))
 
-/** 管理员视角文章投影：全字段（api-spec §4.16） */
-function projectArticle(a, fields = {}) {
+// ─── 投影（字段按 api-spec §4.10～§4.12，不多不少） ─────────────────────
+
+const mediaById = new Map(media.map((m) => [m.id, m]))
+const mediaSizeCache = new Map()
+/** MediaRef（§4.8）：{ media_id, url, mime_type, size } */
+function mediaRef(id) {
+  const m = id && mediaById.get(id)
+  if (!m) return null
+  if (!mediaSizeCache.has(m.id)) {
+    const buf = m.kind === 'cover' ? makeCoverPng(m.id, ...m.palette) : m.kind === 'diagram' ? makeDiagramPng() : makeWav()
+    mediaSizeCache.set(m.id, buf.length)
+  }
+  return { media_id: m.id, url: `/api/media/${m.id}`, mime_type: m.kind === 'audio' ? 'audio/wav' : 'image/png', size: mediaSizeCache.get(m.id) }
+}
+
+const logsOf = (articleId) => adminState.auditLogs.filter((l) => l.article_id === articleId)
+const lastLog = (articleId, actions) =>
+  logsOf(articleId)
+    .filter((l) => actions.includes(l.action))
+    .sort((x, y) => Date.parse(y.operated_at) - Date.parse(x.operated_at) || y.id - x.id)[0] ?? null
+
+/** 当前提交轮次 = 最近一条 SUBMIT 留痕的 id（§4.10）；只在待审核时有意义 */
+function currentSubmissionId(a) {
+  return currentStatus(a.id) === 'PENDING_REVIEW' ? lastLog(a.id, ['SUBMIT'])?.id ?? null : null
+}
+function submittedAt(a) {
+  return lastLog(a.id, ['SUBMIT'])?.operated_at ?? getAdminArticleFields(a.id).submitted_at ?? null
+}
+function publishedAt(a) {
+  return adminState.publishedAt.has(a.id) ? adminState.publishedAt.get(a.id) : a.published_at ?? null
+}
+
+/** 管理员视角的 allowed_actions（§4.1 计算口径表「管理员」列） */
+function adminAllowedActions(status) {
+  if (status === 'PENDING_REVIEW') return ['APPROVE', 'REJECT']
+  if (status === 'PUBLISHED') return ['UNPUBLISH']
+  return []
+}
+
+function briefs(a) {
   const cat = adminState.categories.get(a.category_id) || { id: a.category_id, name: '未知分类' }
-  const tagList = a.tag_ids.map((id) => adminState.tags.get(id)).filter(Boolean)
-  const author = authorById.get(a.author_id) || { id: a.author_id, username: 'unknown', role: 'EDITOR' }
-  const status = currentStatus(a.id)
+  const author = authorById.get(a.author_id) || { id: a.author_id, username: 'unknown' }
   return {
-    id: a.id,
-    title: a.title,
-    excerpt: a.excerpt ?? '',
     category: { id: cat.id, name: cat.name },
-    tags: tagList.map((t) => ({ id: t.id, name: t.name })),
-    cover_url: a.cover_media_id ? `/api/media/${a.cover_media_id}` : null,
+    tags: a.tag_ids.map((id) => adminState.tags.get(id)).filter(Boolean).map((t) => ({ id: t.id, name: t.name })),
     author: { id: author.id, username: author.username },
-    status,
-    submission_round: a.submission_round ?? null,
-    submitted_at: fields.submitted_at ?? null,
-    scheduled_publish_time: a.scheduled_publish_time ?? null,
-    published_at: status === 'PUBLISHED' ? a.published_at : null,
-    created_at: fields.created_at ?? null,
-    updated_at: fields.updated_at ?? null,
-    reject_reason: status === 'REJECTED' ? a.reject_reason ?? null : null,
-    unpublish_reason: status === 'UNPUBLISHED' ? a.unpublish_reason ?? null : null,
-    // 审核详情才返回正文和 current_submission_id，列表不返回正文（api-spec §2.4）
   }
 }
 
-/** 审核详情额外字段：content + current_submission_id */
-function projectArticleDetail(a, fields) {
-  const base = projectArticle(a, fields)
-  if (a.status === 'PENDING_REVIEW') base.current_submission_id = fields.current_submission_id ?? null
-  base.content = a.content
-  return base
+/** ArticleListItem（§4.11） */
+function toAdminListItem(a) {
+  const status = currentStatus(a.id)
+  const { category, tags, author } = briefs(a)
+  const ev = lastLog(a.id, ['REJECT', 'UNPUBLISH'])
+  return {
+    id: a.id,
+    title: a.title,
+    status,
+    category,
+    tags,
+    author,
+    updated_at: getAdminArticleFields(a.id).updated_at ?? null,
+    submitted_at: submittedAt(a),
+    scheduled_publish_time: a.scheduled_publish_time ?? null,
+    published_at: publishedAt(a),
+    latest_event: ev && {
+      type: ev.action,
+      operated_at: ev.operated_at,
+      operator: ev.operator,
+      reject_category: ev.reject_category,
+      reason: ev.reason,
+    },
+    allowed_actions: adminAllowedActions(status),
+  }
+}
+
+/** Article 后台详情（§4.10） */
+function toAdminDetail(a) {
+  const status = currentStatus(a.id)
+  const fields = getAdminArticleFields(a.id)
+  const rj = lastLog(a.id, ['REJECT'])
+  const up = lastLog(a.id, ['UNPUBLISH'])
+  return {
+    id: a.id,
+    title: a.title,
+    content: a.content,
+    excerpt: a.excerpt ?? '',
+    cover: mediaRef(a.cover_media_id),
+    audio: mediaRef(a.audio_media_id),
+    ...briefs(a),
+    scheduled_publish_time: a.scheduled_publish_time ?? null,
+    status,
+    published_at: publishedAt(a),
+    created_at: fields.created_at ?? null,
+    updated_at: fields.updated_at ?? null,
+    submitted_at: submittedAt(a),
+    latest_rejection: rj && { reject_category: rj.reject_category, comment: rj.reason, operator: rj.operator, operated_at: rj.operated_at },
+    latest_unpublish: up && { reason: up.reason, operator: up.operator, operated_at: up.operated_at },
+    current_submission_id: currentSubmissionId(a),
+    allowed_actions: adminAllowedActions(status),
+  }
+}
+
+/** ReviewQueueItem（§4.12） */
+function toQueueItem(a) {
+  const { category, tags, author } = briefs(a)
+  return {
+    id: a.id,
+    title: a.title,
+    author,
+    category,
+    tags,
+    submitted_at: submittedAt(a),
+    scheduled_publish_time: a.scheduled_publish_time ?? null,
+    current_submission_id: currentSubmissionId(a),
+  }
 }
 
 function intParam(sp, name, { def, min, max }) {
@@ -131,20 +216,29 @@ export function listArticlesAdmin(sp) {
   rows.sort((x, y) => Date.parse(getAdminArticleFields(y.a.id).updated_at) - Date.parse(getAdminArticleFields(x.a.id).updated_at) || y.a.id - x.a.id)
 
   const start = (page.value - 1) * size.value
-  const items = rows.slice(start, start + size.value).map(({ a }) => projectArticle(a, getAdminArticleFields(a.id)))
+  const items = rows.slice(start, start + size.value).map(({ a }) => toAdminListItem(a))
   return ok({ items, page: page.value, page_size: size.value, total: rows.length })
 }
 
-/** GET /api/articles/counts (#32) */
+/** GET /api/articles/counts（§6.9）：参数与列表相同但没有 status / 分页；返回 { by_status, total } */
 export function getCounts(sp) {
-  let rows = articles.map((a) => ({ a, s: currentStatus(a.id) }))
-  const title = (sp.get('title') ?? '').trim()
   const catRaw = sp.get('category_id')
+  if (catRaw !== null && catRaw !== '' && !ID_RE.test(catRaw)) return badRequest('category_id', '必须是正整数')
+  const authorRaw = sp.get('author_id')
+  if (authorRaw !== null && authorRaw !== '' && !ID_RE.test(authorRaw)) return badRequest('author_id', '必须是正整数')
+  const tagIds = sp.getAll('tag_ids').filter((v) => v !== '')
+  if (tagIds.some((v) => !ID_RE.test(v))) return badRequest('tag_ids', '必须是正整数')
+  const title = (sp.get('title') ?? '').trim()
+
+  let rows = articles.map((a) => ({ a, s: currentStatus(a.id) }))
   if (catRaw) rows = rows.filter(({ a }) => a.category_id === Number(catRaw))
+  if (authorRaw) rows = rows.filter(({ a }) => a.author_id === Number(authorRaw))
   if (title) rows = rows.filter(({ a }) => a.title.includes(title))
-  const counts = { DRAFT: 0, PENDING_REVIEW: 0, REJECTED: 0, SCHEDULED: 0, PUBLISHED: 0, UNPUBLISHED: 0 }
-  rows.forEach(({ s }) => (counts[s] = (counts[s] || 0) + 1))
-  return ok(counts)
+  for (const t of new Set(tagIds.map(Number))) rows = rows.filter(({ a }) => a.tag_ids.includes(t))
+
+  const by_status = { DRAFT: 0, PENDING_REVIEW: 0, REJECTED: 0, SCHEDULED: 0, PUBLISHED: 0, UNPUBLISHED: 0 }
+  rows.forEach(({ s }) => (by_status[s] += 1))
+  return ok({ by_status, total: rows.length })
 }
 
 /** GET /api/articles/{id} (#8 管理员视角) */
@@ -152,7 +246,7 @@ export function getArticleAdmin(id) {
   if (!ID_RE.test(id)) return notFound()
   const a = articles.find((x) => x.id === Number(id))
   if (!a) return notFound()
-  return ok(projectArticleDetail(a, getAdminArticleFields(a.id)))
+  return ok(toAdminDetail(a))
 }
 
 /** GET /api/articles/{id}/audit-logs (#19) */
@@ -180,20 +274,23 @@ export function getReviewQueue(sp) {
   const authorRaw = sp.get('author_id')
   if (authorRaw !== null && authorRaw !== '' && !ID_RE.test(authorRaw)) return badRequest('author_id', '必须是正整数')
   const title = (sp.get('title') ?? '').trim()
+  const tagIds = sp.getAll('tag_ids').filter((v) => v !== '')
+  if (tagIds.some((v) => !ID_RE.test(v))) return badRequest('tag_ids', '必须是正整数')
 
   let rows = articles
     .filter((a) => currentStatus(a.id) === 'PENDING_REVIEW')
-    .map((a) => ({ a, fields: getAdminArticleFields(a.id) }))
+    .map((a) => ({ a }))
 
   if (catRaw) rows = rows.filter(({ a }) => a.category_id === Number(catRaw))
   if (authorRaw) rows = rows.filter(({ a }) => a.author_id === Number(authorRaw))
   if (title) rows = rows.filter(({ a }) => a.title.includes(title))
+  for (const t of new Set(tagIds.map(Number))) rows = rows.filter(({ a }) => a.tag_ids.includes(t))
 
-  // 按 submitted_at 升序（api-spec §4.4）
-  rows.sort((x, y) => Date.parse(x.fields.submitted_at) - Date.parse(y.fields.submitted_at) || x.a.id - y.a.id)
+  // 按 submitted_at 升序，相同按 id 升序（api-spec §7.1）
+  rows.sort((x, y) => Date.parse(submittedAt(x.a)) - Date.parse(submittedAt(y.a)) || x.a.id - y.a.id)
 
   const start = (page.value - 1) * size.value
-  const items = rows.slice(start, start + size.value).map(({ a, fields }) => projectArticle(a, fields))
+  const items = rows.slice(start, start + size.value).map(({ a }) => toQueueItem(a))
   return ok({ items, page: page.value, page_size: size.value, total: rows.length })
 }
 
@@ -211,8 +308,10 @@ function findArticle(id) {
   if (!a) return { error: notFound() }
   return { a }
 }
-function stateGuard(a) {
+function stateGuard(a, submissionId) {
   if (currentStatus(a.id) !== 'PENDING_REVIEW') return { error: conflict(40900, '当前状态不允许此操作') }
+  // §7.3 / §7.4：轮次与当前提交不符 → 409 SUBMISSION_STALE（旧页面审核新一轮内容）
+  if (Number(submissionId) !== currentSubmissionId(a)) return { error: conflict(40901, '提交轮次已变化，请刷新后重新审核') }
   return {}
 }
 const REJECT_CATEGORY_VALUES = new Set(review_standard.reject_categories.map((c) => c.value))
@@ -221,35 +320,45 @@ const REJECT_CATEGORY_VALUES = new Set(review_standard.reject_categories.map((c)
 export function approve(id, body) {
   const g = findArticle(id)
   if (g.error) return g.error
-  if (!body?.submission_id) return badRequest('submission_id', '必填', 40010)
-  const st = stateGuard(g.a)
+  if (!ID_RE.test(String(body?.submission_id ?? ''))) return badRequest('submission_id', '必填，且为正整数', 40010)
+  const st = stateGuard(g.a, body.submission_id)
   if (st.error) return st.error
-  setStatus(g.a.id, 'PUBLISHED')
+  // §7.3：预定时间在未来 → SCHEDULED（published_at 不变）；否则立即 PUBLISHED
+  const now = nowCst()
+  const sched = g.a.scheduled_publish_time ?? null
+  const scheduled = sched && Date.parse(sched) > Date.parse(now)
+  setStatus(g.a.id, scheduled ? 'SCHEDULED' : 'PUBLISHED')
+  if (!scheduled) adminState.publishedAt.set(g.a.id, now)
   appendAudit(g.a.id, 'APPROVE', {
     review_standard_version: review_standard.review_standard_version,
-    published_at: nowCst(),
-    related_submission_id: body.submission_id,
+    published_at: scheduled ? null : now,
+    related_submission_id: Number(body.submission_id),
   })
-  return ok({ id: g.a.id, status: 'PUBLISHED' })
+  return ok({
+    id: g.a.id,
+    status: scheduled ? 'SCHEDULED' : 'PUBLISHED',
+    published_at: publishedAt(g.a),
+    scheduled_publish_time: sched,
+  })
 }
 
 /** POST /api/articles/{id}/reject (#17) */
 export function reject(id, body) {
   const g = findArticle(id)
   if (g.error) return g.error
-  if (!body?.submission_id) return badRequest('submission_id', '必填', 40010)
+  if (!ID_RE.test(String(body?.submission_id ?? ''))) return badRequest('submission_id', '必填，且为正整数', 40010)
   // FR-REVIEW-003：类别必须是 BR-CONTENT-005 的 8 类之一，意见必填（空串、纯空格视为缺失）
   if (!REJECT_CATEGORY_VALUES.has(body?.reject_category)) return badRequest('reject_category', '必须是 8 个驳回类别之一', 40011)
   const comment = typeof body?.comment === 'string' ? body.comment.trim() : ''
   if (!comment) return badRequest('comment', '驳回意见必填', 40012)
-  const st = stateGuard(g.a)
+  const st = stateGuard(g.a, body.submission_id)
   if (st.error) return st.error
   setStatus(g.a.id, 'REJECTED')
   appendAudit(g.a.id, 'REJECT', {
     reason: comment,
     reject_category: body.reject_category,
     review_standard_version: review_standard.review_standard_version,
-    related_submission_id: body.submission_id,
+    related_submission_id: Number(body.submission_id),
   })
   return ok({ id: g.a.id, status: 'REJECTED' })
 }
@@ -259,11 +368,9 @@ export function unpublish(id, body) {
   if (!ID_RE.test(id)) return notFound()
   const a = articles.find((x) => x.id === Number(id))
   if (!a) return notFound()
-  const st = currentStatus(a.id)
-  if (st !== 'PUBLISHED') {
-    return conflict(40900, '当前状态不允许此操作')
-  }
-  if (!body?.reason || !body.reason.trim()) return badRequest('reason', '下架原因必填')
+  // §2.3：先校验请求体（400），再判断状态（409）
+  if (typeof body?.reason !== 'string' || !body.reason.trim()) return badRequest('reason', '下架原因必填', 40012)
+  if (currentStatus(a.id) !== 'PUBLISHED') return conflict(40900, '当前状态不允许此操作')
   setStatus(a.id, 'UNPUBLISHED')
   appendAudit(a.id, 'UNPUBLISH', { reason: body.reason.trim(), review_standard_version: review_standard.review_standard_version })
   return ok({ id: a.id, status: 'UNPUBLISHED' })

@@ -62,14 +62,16 @@ function handleReviewConflict(e) {
 async function doApprove() {
   try {
     await ElMessageBox.confirm(
-      `通过「${article.value.title}」的第 ${article.value.submission_round || 1} 轮审核？`,
+      `通过「${article.value.title}」本轮提交（#${article.value.current_submission_id}）的审核？`,
       '审核通过确认',
       { type: 'success', confirmButtonText: '通过' }
     )
   } catch { return }
   try {
-    await approveArticle(articleId, { submission_id: article.value.current_submission_id })
-    ElMessage.success('已通过，文章将进入发布队列')
+    const res = await approveArticle(articleId, { submission_id: article.value.current_submission_id })
+    // §7.3：预定时间在未来 → SCHEDULED，否则立即 PUBLISHED
+    if (res?.status === 'SCHEDULED') ElMessage.success(`已通过，将于 ${fmtDateTime(res.scheduled_publish_time)} 发布`)
+    else ElMessage.success('已通过并发布')
     router.push({ name: 'admin-reviews' })
   } catch (e) {
     handleReviewConflict(e)
@@ -120,7 +122,7 @@ async function doReject() {
           <span v-if="article.tags.length">· 标签：
             <el-tag v-for="t in article.tags" :key="t.id" size="small" style="margin-right: 4px">{{ t.name }}</el-tag>
           </span>
-          <span>· 第 {{ article.submission_round || 1 }} 轮</span>
+          <span v-if="article.current_submission_id">· 本轮提交 #{{ article.current_submission_id }}</span>
           <span v-if="article.submitted_at">· 提交时间：{{ fmtDateTime(article.submitted_at) }}</span>
         </div>
         <p v-if="article.excerpt" class="excerpt">{{ article.excerpt }}</p>
@@ -129,7 +131,7 @@ async function doReject() {
       <div class="action-bar card" v-if="canReview">
         <div class="action-hint">
           <el-icon><InfoFilled /></el-icon>
-          <span>文章正文只读，不能编辑。审核通过后自动进入发布流程。</span>
+          <span>文章正文只读，不能编辑。审核通过后：未设预定时间立即发布，预定时间在未来则进入待发布。</span>
         </div>
         <div class="action-buttons">
           <el-button type="danger" @click="openReject">驳回</el-button>

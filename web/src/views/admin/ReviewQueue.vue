@@ -1,6 +1,6 @@
 <script setup>
-// 审核队列（api-spec §4.4 #14）。列出所有 PENDING_REVIEW，按 submitted_at 升序。
-// 不返回正文，正文在详情页读取（api-spec §2.4）。
+// 审核队列（api-spec §7.1）。列出所有 PENDING_REVIEW，按 submitted_at 升序；队列项字段见 §4.12。
+// 不返回正文，正文在详情页读取（§6.3）。
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -11,7 +11,7 @@ const router = useRouter()
 const loading = ref(false)
 const rows = ref([])
 const total = ref(0)
-const counts = ref(null) // 6 状态计数
+const counts = ref(null) // §6.9：{ by_status: { DRAFT… }, total }
 const query = reactive({ page: 1, page_size: 10, category_id: null, author_id: null, title: '' })
 
 async function load() {
@@ -38,19 +38,19 @@ function goDetail(row) { router.push({ name: 'admin-review-detail', params: { id
   <div class="review-queue">
     <div class="stats" v-if="counts">
       <div class="stat-card pending">
-        <div class="num">{{ counts.PENDING_REVIEW }}</div>
+        <div class="num">{{ counts.by_status.PENDING_REVIEW }}</div>
         <div class="label">待审核</div>
       </div>
       <div class="stat-card published">
-        <div class="num">{{ counts.PUBLISHED }}</div>
+        <div class="num">{{ counts.by_status.PUBLISHED }}</div>
         <div class="label">已发布</div>
       </div>
       <div class="stat-card rejected">
-        <div class="num">{{ counts.REJECTED }}</div>
+        <div class="num">{{ counts.by_status.REJECTED }}</div>
         <div class="label">驳回</div>
       </div>
       <div class="stat-card scheduled">
-        <div class="num">{{ counts.SCHEDULED }}</div>
+        <div class="num">{{ counts.by_status.SCHEDULED }}</div>
         <div class="label">待发布</div>
       </div>
     </div>
@@ -71,7 +71,9 @@ function goDetail(row) { router.push({ name: 'admin-review-detail', params: { id
           </div>
         </template>
       </el-table-column>
-      <el-table-column prop="submission_round" label="轮次" width="80" align="center" />
+      <el-table-column label="预定发布" width="180">
+        <template #default="{ row }">{{ row.scheduled_publish_time ? fmtDateTime(row.scheduled_publish_time) : '—' }}</template>
+      </el-table-column>
       <el-table-column label="提交时间" width="180">
         <template #default="{ row }">{{ fmtDateTime(row.submitted_at) }}</template>
       </el-table-column>
