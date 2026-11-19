@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 // 留痕页面（api-spec §8.1）。按 operated_at 正序展示，字段按 §4.13 AuditLog。
 // 动作只有 §4.1 AuditAction 的 7 类；SYSTEM 操作人（AUTO_PUBLISH）显示为「系统」（BR-AUDIT-004）。
 import { onMounted, ref } from 'vue'

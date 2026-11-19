@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 // 标签管理（api-spec §4.18）。支持关键字搜索 + 分页。
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'

@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 // 管理员视角文章详情。只读正文，可下架（只有 PUBLISHED 状态允许）。
 // 审核动作（通过/驳回）走审核详情页 ReviewDetail。
 import { computed, onMounted, ref } from 'vue'

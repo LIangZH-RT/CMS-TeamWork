@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 // 审核详情（api-spec §4.5 #15 / §4.12 #16-17）。
 // 管理员**只读正文**，不能编辑内容（INV-03）。审核动作只有通过 / 驳回，都需要 submission_id。
 import { computed, onMounted, reactive, ref } from 'vue'

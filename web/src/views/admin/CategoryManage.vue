@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 // 分类管理（api-spec §4.17）。G 负责。
 // 校验策略：长度/空白前端只做最小防御（去首尾空白、非空），真正的重名/引用校验让后端返回 409。
 import { onMounted, ref } from 'vue'

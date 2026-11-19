@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 // 全量文章列表（api-spec #6 管理员视角）。
 // 6 状态 Tab 切换，默认按 updated_at 降序。管理员在此列表可执行下架动作。
 import { computed, onMounted, reactive, ref } from 'vue'
