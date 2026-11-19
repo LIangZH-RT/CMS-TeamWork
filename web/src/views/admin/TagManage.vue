@@ -45,6 +45,7 @@ async function submit() {
     await load()
   } catch (e) {
     if (e?.code === 40906) ElMessage.error('标签名已存在')
+    else if (e?.code === 40904) { ElMessage.error('标签已被文章引用，不能改名，请新建标签'); dialog.value.open = false; await load() }
     else ElMessage.error(e?.message || '操作失败')
   } finally {
     dialog.value.submitting = false
@@ -96,7 +97,13 @@ async function onDelete(r) {
       </el-table-column>
       <el-table-column label="操作" width="180" fixed="right">
         <template #default="{ row }">
-          <el-button text size="small" @click="openRename(row)">改名</el-button>
+          <el-button
+            text
+            size="small"
+            :disabled="row.in_use"
+            :title="row.in_use ? '被引用，不能改名，请新建标签' : ''"
+            @click="openRename(row)"
+          >改名</el-button>
           <el-button text size="small" type="danger" :disabled="row.in_use" @click="onDelete(row)">删除</el-button>
         </template>
       </el-table-column>

@@ -408,6 +408,8 @@ export function renameCategory(id, body) {
   if (!c) return notFound()
   const name = body?.name?.trim()
   if (!name) return badRequest('name', '必填')
+  // BR-TAX-004：被任意状态的文章引用就不能改名（§9.3 → 409 TAXONOMY_IN_USE）
+  if (categoryProjection(c).in_use) return conflict(40904, '分类被文章引用，不能改名')
   if ([...adminState.categories.values()].some((x) => x.id !== Number(id) && x.name.toLowerCase() === name.toLowerCase()))
     return conflict(40906, '分类名已存在')
   c.name = name
@@ -455,6 +457,8 @@ export function renameTag(id, body) {
   if (!t) return notFound()
   const name = body?.name?.trim()
   if (!name) return badRequest('name', '必填')
+  // BR-TAX-004：被任意状态的文章引用就不能改名（§9.7 → 409 TAXONOMY_IN_USE）
+  if (tagProjection(t).in_use) return conflict(40904, '标签被文章引用，不能改名')
   if ([...adminState.tags.values()].some((x) => x.id !== Number(id) && x.name.toLowerCase() === name.toLowerCase()))
     return conflict(40906, '标签名已存在')
   t.name = name

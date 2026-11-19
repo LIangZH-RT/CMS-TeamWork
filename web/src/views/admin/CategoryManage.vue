@@ -49,6 +49,7 @@ async function submit() {
   } catch (e) {
     const code = e?.code
     if (code === 40906) ElMessage.error('分类名已存在')
+    else if (code === 40904) { ElMessage.error('分类已被文章引用，不能改名，请新建分类'); dialog.value.open = false; await load() }
     else ElMessage.error(e?.message || '操作失败')
   } finally {
     dialog.value.submitting = false
@@ -83,7 +84,7 @@ async function onDelete(r) {
   <div class="category-manage">
     <div class="topbar">
       <div class="tip">
-        分类名去首尾空白后同类内不区分大小写去重（api-spec §16-2）。被文章引用的分类无法删除（409）。
+        分类名去首尾空白后同类内不区分大小写去重（api-spec §16-2）。被文章引用的分类不能改名或删除（BR-TAX-004）。
       </div>
       <el-button type="primary" @click="openCreate">+ 新建分类</el-button>
     </div>
@@ -100,7 +101,13 @@ async function onDelete(r) {
       </el-table-column>
       <el-table-column label="操作" width="180" fixed="right">
         <template #default="{ row }">
-          <el-button text size="small" @click="openRename(row)">改名</el-button>
+          <el-button
+            text
+            size="small"
+            :disabled="row.in_use"
+            :title="row.in_use ? '被引用，不能改名，请新建分类' : ''"
+            @click="openRename(row)"
+          >改名</el-button>
           <el-button text size="small" type="danger" :disabled="row.in_use" @click="onDelete(row)">删除</el-button>
         </template>
       </el-table-column>
