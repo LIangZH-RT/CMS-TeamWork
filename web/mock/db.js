@@ -164,17 +164,18 @@ export const authors = [
   { id: 15, username: 'sunqi', role: 'EDITOR' },
 ]
 
-// 审核标准：服务端配置项（api-spec #14 标准版本 + 驳回类别字典）
+// 审核标准：服务端配置项（api-spec §7.2；版本见 SRS §6.1.1，类别见 BR-CONTENT-005 / api-spec §4.1）
 export const review_standard = {
-  version: 'v1.0',
-  updated_at: '2026-10-15T09:00:00+08:00',
-  categories: [
-    { code: 'INCOMPLETE', name: '内容不完整' },
-    { code: 'LOW_QUALITY', name: '质量不达标' },
-    { code: 'INCORRECT', name: '事实错误' },
-    { code: 'PLAGIARISM', name: '涉嫌抄袭' },
-    { code: 'OFF_TOPIC', name: '选题偏离' },
-    { code: 'OTHER', name: '其他' },
+  review_standard_version: 'CMS-CONTENT-REVIEW-1.0',
+  reject_categories: [
+    { value: 'ILLEGAL', label: '违法违规' },
+    { value: 'AUTHENTICITY_SOURCE', label: '真实性／来源' },
+    { value: 'COPYRIGHT_PRIVACY', label: '版权／隐私' },
+    { value: 'MINOR_VULGAR_VIOLENCE', label: '未成年人／低俗／暴力' },
+    { value: 'DISCRIMINATION_HARASSMENT', label: '歧视／骚扰／引战' },
+    { value: 'SPAM_MARKETING', label: '垃圾／营销' },
+    { value: 'QUALITY_POSITIONING', label: '内容质量／博客定位' },
+    { value: 'OTHER', label: '其他' },
   ],
 }
 
@@ -214,7 +215,7 @@ const userActor = (id) => {
   const u = authors.find((a) => a.id === id)
   return { type: 'USER', id: u.id, username: u.username }
 }
-const REVIEW_STD = 'CMS-CONTENT-REVIEW-1.0'
+const REVIEW_STD = review_standard.review_standard_version
 
 export function auditLog(id, article_id, action, operator, operated_at, extra = {}) {
   return {

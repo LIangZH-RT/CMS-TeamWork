@@ -83,6 +83,7 @@ function openReject() {
 }
 async function doReject() {
   if (!rejectDialog.category) { ElMessage.warning('请选择驳回类别'); return }
+  if (!rejectDialog.comment.trim()) { ElMessage.warning('请填写驳回意见'); return }
   rejectDialog.submitting = true
   try {
     await rejectArticle(articleId, {
@@ -148,22 +149,25 @@ async function doReject() {
         :close-on-click-modal="false"
       >
         <el-form label-width="90px">
+          <el-form-item label="审核标准">
+            <span class="std-version">{{ standard.review_standard_version }}</span>
+          </el-form-item>
           <el-form-item label="驳回类别" required>
             <el-select v-model="rejectDialog.category" placeholder="请选择" style="width: 100%">
               <el-option
-                v-for="c in standard.categories"
-                :key="c.code"
-                :label="c.name"
-                :value="c.code"
+                v-for="c in standard.reject_categories"
+                :key="c.value"
+                :label="c.label"
+                :value="c.value"
               />
             </el-select>
           </el-form-item>
-          <el-form-item label="说明">
+          <el-form-item label="驳回意见" required>
             <el-input
               v-model="rejectDialog.comment"
               type="textarea"
               :rows="4"
-              placeholder="给编辑的反馈（可选）"
+              placeholder="写明具体问题，编辑会在后台看到这条意见"
               maxlength="500"
               show-word-limit
             />

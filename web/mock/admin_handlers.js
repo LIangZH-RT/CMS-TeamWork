@@ -42,10 +42,10 @@ function appendAudit(articleId, action, extra = {}) {
 
 const ok = (data) => ({ status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' }, body: JSON.stringify({ code: 0, message: 'OK', data }) })
 const notFound = () => ({ status: 404, headers: { 'Content-Type': 'application/json; charset=utf-8' }, body: JSON.stringify({ code: 40400, message: '资源不存在', data: null }) })
-const badRequest = (field, reason) => ({
+const badRequest = (field, reason, code = 40000) => ({
   status: 400,
   headers: { 'Content-Type': 'application/json; charset=utf-8' },
-  body: JSON.stringify({ code: 40000, message: '参数校验失败', data: { field_errors: [{ field, reason }] } }),
+  body: JSON.stringify({ code, message: '参数校验失败', data: { field_errors: [{ field, reason }] } }),
 })
 const conflict = (code, message, detail) => ({
   status: 409,
@@ -203,26 +203,30 @@ export function getStandard() {
 }
 
 /** 审核通过 / 驳回：状态闸（api-spec §3.3：40900 STATE_CONFLICT） */
+// 校验顺序按 api-spec §2.3：404（不存在）→ 400（请求体）→ 409（状态闸）。
 // 失败一律以 { error } 返回，调用方 `if (g.error) return g.error`
-function reviewGuard(id) {
+function findArticle(id) {
   if (!ID_RE.test(id)) return { error: notFound() }
   const a = articles.find((x) => x.id === Number(id))
   if (!a) return { error: notFound() }
-  const st = currentStatus(a.id)
-  if (st !== 'PENDING_REVIEW') {
-    return { error: conflict(40900, '当前状态不允许此操作') }
-  }
   return { a }
 }
+function stateGuard(a) {
+  if (currentStatus(a.id) !== 'PENDING_REVIEW') return { error: conflict(40900, '当前状态不允许此操作') }
+  return {}
+}
+const REJECT_CATEGORY_VALUES = new Set(review_standard.reject_categories.map((c) => c.value))
 
 /** POST /api/articles/{id}/approve (#16) */
 export function approve(id, body) {
-  const g = reviewGuard(id)
+  const g = findArticle(id)
   if (g.error) return g.error
-  if (!body?.submission_id) return badRequest('submission_id', '必填')
+  if (!body?.submission_id) return badRequest('submission_id', '必填', 40010)
+  const st = stateGuard(g.a)
+  if (st.error) return st.error
   setStatus(g.a.id, 'PUBLISHED')
   appendAudit(g.a.id, 'APPROVE', {
-    review_standard_version: review_standard.version,
+    review_standard_version: review_standard.review_standard_version,
     published_at: nowCst(),
     related_submission_id: body.submission_id,
   })
@@ -231,15 +235,20 @@ export function approve(id, body) {
 
 /** POST /api/articles/{id}/reject (#17) */
 export function reject(id, body) {
-  const g = reviewGuard(id)
+  const g = findArticle(id)
   if (g.error) return g.error
-  if (!body?.submission_id) return badRequest('submission_id', '必填')
-  if (!body?.reject_category) return badRequest('reject_category', '必填')
+  if (!body?.submission_id) return badRequest('submission_id', '必填', 40010)
+  // FR-REVIEW-003：类别必须是 BR-CONTENT-005 的 8 类之一，意见必填（空串、纯空格视为缺失）
+  if (!REJECT_CATEGORY_VALUES.has(body?.reject_category)) return badRequest('reject_category', '必须是 8 个驳回类别之一', 40011)
+  const comment = typeof body?.comment === 'string' ? body.comment.trim() : ''
+  if (!comment) return badRequest('comment', '驳回意见必填', 40012)
+  const st = stateGuard(g.a)
+  if (st.error) return st.error
   setStatus(g.a.id, 'REJECTED')
   appendAudit(g.a.id, 'REJECT', {
-    reason: body.comment ?? '',
+    reason: comment,
     reject_category: body.reject_category,
-    review_standard_version: review_standard.version,
+    review_standard_version: review_standard.review_standard_version,
     related_submission_id: body.submission_id,
   })
   return ok({ id: g.a.id, status: 'REJECTED' })
@@ -256,7 +265,7 @@ export function unpublish(id, body) {
   }
   if (!body?.reason || !body.reason.trim()) return badRequest('reason', '下架原因必填')
   setStatus(a.id, 'UNPUBLISHED')
-  appendAudit(a.id, 'UNPUBLISH', { reason: body.reason.trim(), review_standard_version: review_standard.version })
+  appendAudit(a.id, 'UNPUBLISH', { reason: body.reason.trim(), review_standard_version: review_standard.review_standard_version })
   return ok({ id: a.id, status: 'UNPUBLISHED' })
 }
 
