@@ -2,15 +2,12 @@
 // 管理员后台独立布局（G 负责）。与博客前台 PublicLayout 完全隔离。
 // 侧边栏固定、顶栏显示当前用户与登出。
 // CSRF / 真实登录由 F 的 auth store 接手，G 只消费 isAdmin / user。
-import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from '@/stores/auth'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuth()
-
-onMounted(() => auth.fetchMe())
 
 const isAdminRoute = (name) => route.name === name
 const nav = [
@@ -20,11 +17,7 @@ const nav = [
   { name: 'admin-tags', label: '标签管理', icon: 'PriceTag' },
 ]
 
-// 体验守卫：非管理员（或未登录）跳回前台 404
-// 只做体验，不承担权限职责（architecture §3.3）
-if (auth.isLoggedIn && !auth.isAdmin) {
-  router.replace({ name: 'not-found' })
-}
+// 登录与角色判断在 router/index.js 的全局 beforeEach（meta.requiresAdmin）里，这里不再重复
 
 // 登出（mock 占位，F 接真实 #4 接口）
 function onLogout() {
