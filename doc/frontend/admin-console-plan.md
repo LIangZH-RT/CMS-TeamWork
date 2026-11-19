@@ -406,7 +406,7 @@ export function deleteTag(id) → DELETE /api/tags/{id}
 
 | 事项 | 说明 |
 |---|---|
-| 接口存在性 | api-spec 定义了 32 个接口，管理员用其中 **18 个**（#6/8/14/15/16/17/18/19/20/21/22/23/24/25/26/27/32 + 详情里的 current_submission_id） |
+| 接口存在性 | 管理员用到的接口见本文 §12，全部以 api-spec 为准，前端不自造路径和字段 |
 | 数据校验 | 前端做表单校验（非空、长度），但**后端会二次校验**，前端校验只是为了用户体验，不能代替服务端 |
 | 状态迁移 | 前端不直接写 `status`，全部通过动作接口（approve/reject/unpublish/withdraw/reschedule/submit/delete） |
 | 归属隔离 | 后端 MyBatis-Plus 拦截器强制执行，前端不用管（管理员看全部，编辑看自己） |
@@ -452,25 +452,6 @@ export function deleteTag(id) → DELETE /api/tags/{id}
 
 ---
 
-## 12 附录：管理员端完整接口清单（18 个）
+## 12 附录：接口出处
 
-| # | 模块 | 方法 | 路径 | 说明 |
-|---|---|---|---|---|
-| 5 | AUTH | GET | `/api/auth/me` | 当前用户（auth store 用） |
-| 6 | ARTICLE | GET | `/api/articles` | 全量文章列表（管理员不附加 author_id） |
-| 8 | ARTICLE | GET | `/api/articles/{id}` | 文章详情（待审核时含 current_submission_id） |
-| 14 | REVIEW | GET | `/api/reviews/queue` | 审核队列（仅 PENDING_REVIEW，按 submitted_at 升序） |
-| 15 | REVIEW | GET | `/api/reviews/standard` | 审核标准版本 + 驳回类别字典 |
-| 16 | REVIEW | POST | `/api/articles/{id}/approve` | 审核通过（请求体只有 submission_id） |
-| 17 | REVIEW | POST | `/api/articles/{id}/reject` | 驳回（submission_id + reject_category + comment） |
-| 18 | REVIEW | POST | `/api/articles/{id}/unpublish` | 下架（reason 必填） |
-| 19 | AUDIT | GET | `/api/articles/{id}/audit-logs` | 留痕时间线（按 operated_at 正序） |
-| 20 | TAX | GET | `/api/categories` | 分类列表（全量，不分页） |
-| 21 | TAX | POST | `/api/categories` | 创建分类 |
-| 22 | TAX | PUT | `/api/categories/{id}` | 改名 |
-| 23 | TAX | DELETE | `/api/categories/{id}` | 删除 |
-| 24 | TAX | GET | `/api/tags` | 标签列表（分页 + keyword） |
-| 25 | TAX | POST | `/api/tags` | 创建标签 |
-| 26 | TAX | PUT | `/api/tags/{id}` | 改名 |
-| 27 | TAX | DELETE | `/api/tags/{id}` | 删除 |
-| 32 | ARTICLE | GET | `/api/articles/counts` | 6 状态计数（管理员统计全部文章） |
+管理员端用到的接口不在本文另列清单，以 `doc/api/api-spec.md` 为准：§6.1、§6.3、§6.9（文章列表、详情、计数），§7.1～§7.5（审核队列、审核标准、通过、驳回、下架），§8.1（留痕），§9.1～§9.8（分类与标签），以及 §5.5（当前用户）。字段结构见 §4.10～§4.13，错误码见 §3.3。
