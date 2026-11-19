@@ -32,3 +32,26 @@ export const STATUS_TAG_TYPE = {
 export const ALL_STATUSES = Object.values(ARTICLE_STATUS)
 
 export const STATUS_OPTIONS = ALL_STATUSES.map((v) => ({ value: v, label: STATUS_LABEL[v] }))
+
+// 留痕操作类型（api-spec §4.1 AuditAction，固定 7 类）
+export const AUDIT_ACTION_LABEL = {
+  SUBMIT: '提交审核',
+  APPROVE: '审核通过',
+  REJECT: '驳回',
+  UNPUBLISH: '下架',
+  WITHDRAW: '撤回',
+  RESCHEDULE: '改期',
+  AUTO_PUBLISH: '到期自动发布',
+}
+
+// 驳回类别（api-spec §4.1 RejectCategory / SRS BR-CONTENT-005，固定 8 类）
+export const REJECT_CATEGORY_LABEL = {
+  ILLEGAL: '违法违规',
+  AUTHENTICITY_SOURCE: '真实性／来源',
+  COPYRIGHT_PRIVACY: '版权／隐私',
+  MINOR_VULGAR_VIOLENCE: '未成年人／低俗／暴力',
+  DISCRIMINATION_HARASSMENT: '歧视／骚扰／引战',
+  SPAM_MARKETING: '垃圾／营销',
+  QUALITY_POSITIONING: '内容质量／博客定位',
+  OTHER: '其他',
+}

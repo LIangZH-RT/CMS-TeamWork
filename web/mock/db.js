@@ -206,23 +206,61 @@ export function getAdminArticleFields(id) {
   return ADMIN_FIELDS[id] || {}
 }
 
-// 留痕（audit_log）：按 operated_at 升序返回（api-spec §4.21）
+// 留痕（AuditLog，api-spec §4.13 / §8.1）：字段齐全，「不写入」的字段一律为 null。
+// 动作只有 §4.1 AuditAction 的 7 类；current_submission_id = 本轮 SUBMIT 留痕的 id（§4.10）。
+const ADMIN_ACTOR = { type: 'USER', id: 1, username: 'admin' }
+const SYSTEM_ACTOR = { type: 'SYSTEM', id: null, username: null }
+const userActor = (id) => {
+  const u = authors.find((a) => a.id === id)
+  return { type: 'USER', id: u.id, username: u.username }
+}
+const REVIEW_STD = 'CMS-CONTENT-REVIEW-1.0'
+
+export function auditLog(id, article_id, action, operator, operated_at, extra = {}) {
+  return {
+    id,
+    article_id,
+    action,
+    operator,
+    operated_at,
+    reason: null,
+    reject_category: null,
+    review_standard_version: null,
+    published_at: null,
+    schedule_change: null,
+    related_approval_id: null,
+    related_submission_id: null,
+    ...extra,
+  }
+}
+
 export const audit_logs = [
-  // article 109 的留痕示例：多轮审核 + 下架 + 恢复
-  { id: 1, article_id: 109, operator_id: 12, operator_role: 'EDITOR', action: 'CREATE', detail: {}, operated_at: '2026-10-01T09:00:00+08:00' },
-  { id: 2, article_id: 109, operator_id: 12, operator_role: 'EDITOR', action: 'EDIT', detail: { field: 'title', before: 'JVM Full GC 排查', after: '一次 JVM Full GC 告警的排查全过程' }, operated_at: '2026-10-03T14:00:00+08:00' },
-  { id: 3, article_id: 109, operator_id: 12, operator_role: 'EDITOR', action: 'SUBMIT', detail: { submission_id: 901, round: 1 }, operated_at: '2026-10-15T10:00:00+08:00' },
-  { id: 4, article_id: 109, operator_id: 1, operator_role: 'ADMIN', action: 'REJECT', detail: { submission_id: 901, reason_category: 'OTHER', reason_comment: '缺少堆转储截图' }, operated_at: '2026-10-16T11:00:00+08:00' },
-  { id: 5, article_id: 109, operator_id: 12, operator_role: 'EDITOR', action: 'SUBMIT', detail: { submission_id: 902, round: 2 }, operated_at: '2026-11-01T09:00:00+08:00' },
-  { id: 6, article_id: 109, operator_id: 1, operator_role: 'ADMIN', action: 'APPROVE', detail: { submission_id: 902 }, operated_at: '2026-11-05T15:00:00+08:00' },
-  { id: 7, article_id: 109, operator_id: 1, operator_role: 'ADMIN', action: 'UNPUBLISH', detail: { reason: '临时下架补充数据' }, operated_at: '2026-11-09T20:00:00+08:00' },
-  { id: 8, article_id: 109, operator_id: 12, operator_role: 'EDITOR', action: 'SUBMIT', detail: { submission_id: 903, round: 3 }, operated_at: '2026-11-09T21:00:00+08:00' },
-  { id: 9, article_id: 109, operator_id: 1, operator_role: 'ADMIN', action: 'APPROVE', detail: { submission_id: 903 }, operated_at: '2026-11-09T21:05:00+08:00' },
-  // article 121 的留痕（待审核）
-  { id: 10, article_id: 121, operator_id: 12, operator_role: 'EDITOR', action: 'CREATE', detail: {}, operated_at: '2026-11-10T08:00:00+08:00' },
-  { id: 11, article_id: 121, operator_id: 12, operator_role: 'EDITOR', action: 'SUBMIT', detail: { submission_id: 1001, round: 1 }, operated_at: '2026-11-15T08:00:00+08:00' },
-  // article 122 的留痕（被驳回）
-  { id: 12, article_id: 122, operator_id: 12, operator_role: 'EDITOR', action: 'CREATE', detail: {}, operated_at: '2026-10-20T09:00:00+08:00' },
-  { id: 13, article_id: 122, operator_id: 12, operator_role: 'EDITOR', action: 'SUBMIT', detail: { submission_id: 1002, round: 1 }, operated_at: '2026-11-08T09:00:00+08:00' },
-  { id: 14, article_id: 122, operator_id: 1, operator_role: 'ADMIN', action: 'REJECT', detail: { submission_id: 1002, reason_category: 'INCOMPLETE', reason_comment: '内容不完整' }, operated_at: '2026-11-12T10:00:00+08:00' },
+  // 109（作者 zhangsan）：驳回 → 重提通过 → 下架 → 重提通过
+  auditLog(901, 109, 'SUBMIT', userActor(11), '2026-10-15T10:00:00+08:00'),
+  auditLog(902, 109, 'REJECT', ADMIN_ACTOR, '2026-10-16T11:00:00+08:00', { reason: '缺少堆转储截图', reject_category: 'QUALITY_POSITIONING', review_standard_version: REVIEW_STD, related_submission_id: 901 }),
+  auditLog(903, 109, 'SUBMIT', userActor(11), '2026-11-01T09:00:00+08:00'),
+  auditLog(904, 109, 'APPROVE', ADMIN_ACTOR, '2026-11-05T15:00:00+08:00', { review_standard_version: REVIEW_STD, published_at: '2026-11-05T15:00:00+08:00', related_submission_id: 903 }),
+  auditLog(905, 109, 'UNPUBLISH', ADMIN_ACTOR, '2026-11-09T20:00:00+08:00', { reason: '临时下架补充数据', review_standard_version: REVIEW_STD }),
+  auditLog(906, 109, 'SUBMIT', userActor(11), '2026-11-09T21:00:00+08:00'),
+  auditLog(907, 109, 'APPROVE', ADMIN_ACTOR, '2026-11-09T21:05:00+08:00', { review_standard_version: REVIEW_STD, published_at: '2026-11-09T21:05:00+08:00', related_submission_id: 906 }),
+  // 104（作者 zhaoliu）：通过时预定时间在未来 → 改期 → 到期自动发布
+  auditLog(910, 104, 'SUBMIT', userActor(14), '2026-10-28T10:00:00+08:00'),
+  auditLog(911, 104, 'APPROVE', ADMIN_ACTOR, '2026-10-29T09:30:00+08:00', { review_standard_version: REVIEW_STD, related_submission_id: 910 }),
+  auditLog(912, 104, 'RESCHEDULE', userActor(14), '2026-10-30T18:00:00+08:00', { schedule_change: { from: '2026-11-01T09:00:00+08:00', to: '2026-11-02T14:00:00+08:00' } }),
+  auditLog(913, 104, 'AUTO_PUBLISH', SYSTEM_ACTOR, '2026-11-02T14:00:00+08:00', { published_at: '2026-11-02T14:00:00+08:00', related_approval_id: 911 }),
+  // 121（作者 lisi，待审核）：本轮提交 = 1001
+  auditLog(1001, 121, 'SUBMIT', userActor(12), '2026-11-15T08:00:00+08:00'),
+  // 122（作者 lisi，被驳回）
+  auditLog(1002, 122, 'SUBMIT', userActor(12), '2026-11-08T09:00:00+08:00'),
+  auditLog(1003, 122, 'REJECT', ADMIN_ACTOR, '2026-11-12T10:00:00+08:00', { reason: '正文缺少实际案例', reject_category: 'QUALITY_POSITIONING', review_standard_version: REVIEW_STD, related_submission_id: 1002 }),
+  // 123（作者 wangwu，待发布）：提交 → 通过（预定时间在未来）→ 撤回后重提 → 通过
+  auditLog(1010, 123, 'SUBMIT', userActor(13), '2026-11-10T09:00:00+08:00'),
+  auditLog(1011, 123, 'APPROVE', ADMIN_ACTOR, '2026-11-11T10:00:00+08:00', { review_standard_version: REVIEW_STD, related_submission_id: 1010 }),
+  auditLog(1012, 123, 'WITHDRAW', userActor(13), '2026-11-12T11:00:00+08:00'),
+  auditLog(1013, 123, 'SUBMIT', userActor(13), '2026-11-13T09:00:00+08:00'),
+  auditLog(1014, 123, 'APPROVE', ADMIN_ACTOR, '2026-11-14T09:00:00+08:00', { review_standard_version: REVIEW_STD, related_submission_id: 1013 }),
+  // 124（作者 zhangsan，已下架）
+  auditLog(1020, 124, 'SUBMIT', userActor(11), '2026-09-30T09:00:00+08:00'),
+  auditLog(1021, 124, 'APPROVE', ADMIN_ACTOR, '2026-10-01T09:00:00+08:00', { review_standard_version: REVIEW_STD, published_at: '2026-10-01T09:00:00+08:00', related_submission_id: 1020 }),
+  auditLog(1022, 124, 'UNPUBLISH', ADMIN_ACTOR, '2026-10-01T10:00:00+08:00', { reason: '涉及敏感信息', review_standard_version: REVIEW_STD }),
 ]

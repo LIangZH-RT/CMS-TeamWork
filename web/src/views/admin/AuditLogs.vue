@@ -1,11 +1,12 @@
 ﻿<script setup>
-// 留痕页面（api-spec #19）。按 operated_at 正序展示。
-// admin_handlers 追加的 auditLogs 包含 CREATE / EDIT / SUBMIT / REJECT / APPROVE / UNPUBLISH 六种动作。
+// 留痕页面（api-spec §8.1）。按 operated_at 正序展示，字段按 §4.13 AuditLog。
+// 动作只有 §4.1 AuditAction 的 7 类；SYSTEM 操作人（AUTO_PUBLISH）显示为「系统」（BR-AUDIT-004）。
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getAuditLogs } from '@/api/admin'
 import { fmtDateTime } from '@/utils/format'
+import { AUDIT_ACTION_LABEL, REJECT_CATEGORY_LABEL } from '@/utils/status'
 
 const route = useRoute()
 const router = useRouter()
@@ -14,20 +15,38 @@ const articleId = route.params.id
 const loading = ref(true)
 const logs = ref([])
 
-const ACTION_META = {
-  CREATE:       { label: '创建',       color: '#6b7280', icon: 'Edit' },
-  EDIT:         { label: '编辑',       color: '#3b82f6', icon: 'Edit' },
-  SUBMIT:       { label: '提交审核',   color: '#f59e0b', icon: 'Document' },
-  REJECT:       { label: '驳回',       color: '#ef4444', icon: 'Warning' },
-  APPROVE:      { label: '审核通过',   color: '#10b981', icon: 'CircleCheck' },
-  UNPUBLISH:    { label: '下架',       color: '#dc2626', icon: 'Download' },
+const ACTION_COLOR = {
+  SUBMIT: '#f59e0b',
+  APPROVE: '#10b981',
+  REJECT: '#ef4444',
+  UNPUBLISH: '#dc2626',
+  WITHDRAW: '#6b7280',
+  RESCHEDULE: '#3b82f6',
+  AUTO_PUBLISH: '#059669',
+}
+
+function operatorText(op) {
+  if (!op || op.type === 'SYSTEM') return '系统'
+  return `${op.username} #${op.id}`
+}
+
+/** 只列出有值的字段（§4.13：未写入的字段为 null） */
+function detailRows(log) {
+  const rows = []
+  if (log.reject_category) rows.push(['驳回类别', REJECT_CATEGORY_LABEL[log.reject_category] || log.reject_category])
+  if (log.reason) rows.push([log.action === 'UNPUBLISH' ? '下架原因' : '驳回意见', log.reason])
+  if (log.schedule_change) rows.push(['预定时间', `${fmtDateTime(log.schedule_change.from)} → ${fmtDateTime(log.schedule_change.to)}`])
+  if (log.published_at) rows.push(['发布时间', fmtDateTime(log.published_at)])
+  if (log.review_standard_version) rows.push(['审核标准', log.review_standard_version])
+  if (log.related_submission_id != null) rows.push(['对应提交', `#${log.related_submission_id}`])
+  if (log.related_approval_id != null) rows.push(['对应审核通过', `#${log.related_approval_id}`])
+  return rows
 }
 
 async function load() {
   loading.value = true
   try {
-    const res = await getAuditLogs(articleId)
-    logs.value = res.data
+    logs.value = await getAuditLogs(articleId) // http.js 已解包，直接是 AuditLog[]
   } catch (e) {
     ElMessage.error(e?.message || '加载留痕失败')
   } finally {
@@ -45,21 +64,19 @@ onMounted(load)
 
     <div class="timeline" v-if="logs.length">
       <div class="tl-item" v-for="(log, idx) in logs" :key="log.id">
-        <div class="tl-dot" :style="{ background: ACTION_META[log.action]?.color || '#6b7280' }" />
+        <div class="tl-dot" :style="{ background: ACTION_COLOR[log.action] || '#6b7280' }" />
         <div class="tl-content">
           <div class="tl-header">
-            <span class="tl-action" :style="{ color: ACTION_META[log.action]?.color || '#6b7280' }">
-              {{ ACTION_META[log.action]?.label || log.action }}
+            <span class="tl-action" :style="{ color: ACTION_COLOR[log.action] || '#6b7280' }">
+              {{ AUDIT_ACTION_LABEL[log.action] || log.action }}
             </span>
-            <span class="tl-operator">
-              by {{ log.operator_role === 'ADMIN' ? '管理员' : '编辑' }} #{{ log.operator_id }}
-            </span>
+            <span class="tl-operator">#{{ log.id }} · {{ operatorText(log.operator) }}</span>
             <span class="tl-time">{{ fmtDateTime(log.operated_at) }}</span>
           </div>
-          <div v-if="Object.keys(log.detail).length" class="tl-detail">
-            <div class="detail-kv" v-for="(v, k) in log.detail" :key="k">
+          <div v-if="detailRows(log).length" class="tl-detail">
+            <div class="detail-kv" v-for="[k, v] in detailRows(log)" :key="k">
               <span class="k">{{ k }}</span>
-              <span class="v">{{ typeof v === 'object' ? JSON.stringify(v) : v }}</span>
+              <span class="v">{{ v }}</span>
             </div>
           </div>
         </div>
@@ -107,7 +124,7 @@ onMounted(load)
 }
 .detail-kv { display: flex; gap: 8px; margin-bottom: 4px; }
 .detail-kv:last-child { margin-bottom: 0; }
-.k { color: #6b7280; font-family: monospace; min-width: 120px; }
+.k { color: #6b7280; min-width: 96px; }
 .v { color: #1f2937; word-break: break-all; }
 .tl-connector {
   position: absolute;

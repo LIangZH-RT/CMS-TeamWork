@@ -4,7 +4,7 @@
 //
 // 注意：这是内存 mock，POST/PUT/DELETE 的改动只存在于当前 Vite dev server 生命周期。
 // 真实后端实现以 api-spec 为准。
-import { articles, categories, tags, authors, audit_logs, review_standard, getAdminArticleFields } from './db.js'
+import { articles, categories, tags, authors, audit_logs, auditLog, review_standard, getAdminArticleFields } from './db.js'
 
 // 可变引用：admin 端会改分类/标签数组（新建/改名/删除），这些数组被外部 import
 // 但 db.js 导出的是 const 数组，所以用 Map 做运行态
@@ -13,7 +13,7 @@ const adminState = {
   tags: new Map(tags.map((t) => [t.id, { ...t }])),
   articleStatus: new Map(), // 文章状态运行态变更（approve → PUBLISHED / reject → REJECTED / unpublish → UNPUBLISHED）
   auditLogs: [...audit_logs],
-  nextAuditId: audit_logs.length + 1,
+  nextAuditId: audit_logs.reduce((m, l) => Math.max(m, l.id), 0) + 1,
   nextCategoryId: categories.reduce((m, c) => Math.max(m, c.id), 0) + 1,
   nextTagId: tags.reduce((m, t) => Math.max(m, t.id), 0) + 1,
 }
@@ -26,18 +26,18 @@ function setStatus(id, status) {
   adminState.articleStatus.set(id, status)
 }
 
-/** 模拟留痕追加：所有 admin 动作都写一条 */
-function appendAudit(articleId, action, detail) {
-  const id = adminState.nextAuditId++
-  adminState.auditLogs.push({
-    id,
-    article_id: articleId,
-    operator_id: 1,
-    operator_role: 'ADMIN',
-    action,
-    detail,
-    operated_at: new Date().toISOString().replace('T', ' ').slice(0, 16).replace(' ', 'T') + '+08:00',
-  })
+const ADMIN_ACTOR = { type: 'USER', id: 1, username: 'admin' }
+
+/** 当前时间，固定 +08:00 偏移、精确到秒（api-spec §1.3） */
+function nowCst() {
+  return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 19) + '+08:00'
+}
+
+/** 模拟留痕追加（字段按 api-spec §4.13，未写入的字段为 null）；返回新留痕 */
+function appendAudit(articleId, action, extra = {}) {
+  const log = auditLog(adminState.nextAuditId++, articleId, action, ADMIN_ACTOR, nowCst(), extra)
+  adminState.auditLogs.push(log)
+  return log
 }
 
 const ok = (data) => ({ status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' }, body: JSON.stringify({ code: 0, message: 'OK', data }) })
@@ -162,7 +162,7 @@ export function getAuditLogs(id) {
   if (!a) return notFound()
   const logs = adminState.auditLogs
     .filter((l) => l.article_id === Number(id))
-    .sort((x, y) => Date.parse(x.operated_at) - Date.parse(y.operated_at))
+    .sort((x, y) => Date.parse(x.operated_at) - Date.parse(y.operated_at) || x.id - y.id)
   return ok(logs)
 }
 
@@ -221,7 +221,11 @@ export function approve(id, body) {
   if (g.error) return g.error
   if (!body?.submission_id) return badRequest('submission_id', '必填')
   setStatus(g.a.id, 'PUBLISHED')
-  appendAudit(g.a.id, 'APPROVE', { submission_id: body.submission_id })
+  appendAudit(g.a.id, 'APPROVE', {
+    review_standard_version: review_standard.version,
+    published_at: nowCst(),
+    related_submission_id: body.submission_id,
+  })
   return ok({ id: g.a.id, status: 'PUBLISHED' })
 }
 
@@ -233,9 +237,10 @@ export function reject(id, body) {
   if (!body?.reject_category) return badRequest('reject_category', '必填')
   setStatus(g.a.id, 'REJECTED')
   appendAudit(g.a.id, 'REJECT', {
-    submission_id: body.submission_id,
-    reason_category: body.reject_category,
-    reason_comment: body.comment ?? '',
+    reason: body.comment ?? '',
+    reject_category: body.reject_category,
+    review_standard_version: review_standard.version,
+    related_submission_id: body.submission_id,
   })
   return ok({ id: g.a.id, status: 'REJECTED' })
 }
@@ -251,7 +256,7 @@ export function unpublish(id, body) {
   }
   if (!body?.reason || !body.reason.trim()) return badRequest('reason', '下架原因必填')
   setStatus(a.id, 'UNPUBLISHED')
-  appendAudit(a.id, 'UNPUBLISH', { reason: body.reason.trim() })
+  appendAudit(a.id, 'UNPUBLISH', { reason: body.reason.trim(), review_standard_version: review_standard.version })
   return ok({ id: a.id, status: 'UNPUBLISHED' })
 }
 
