@@ -95,7 +95,7 @@ function goAudit() {
           <el-button type="danger" @click="onUnpublish">下架</el-button>
         </div>
         <div v-if="article.status === ARTICLE_STATUS.PENDING_REVIEW" class="pending-hint">
-          <el-icon><InfoFilled /></el-icon>
+          <span class="hint-icon" aria-hidden="true">ⓘ</span>
           <span>此文章正在审核中，请前往审核详情页处理。</span>
           <el-button type="primary" size="small" link @click="router.push({ name: 'admin-review-detail', params: { id: article.id } })">去审核 →</el-button>
         </div>
@@ -138,4 +138,5 @@ function goAudit() {
   font-size: 14px; font-weight: 600; color: #374151;
   margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #e5e7eb;
 }
+.hint-icon { font-size: 15px; line-height: 1; }
 </style>

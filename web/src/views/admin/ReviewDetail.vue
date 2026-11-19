@@ -130,7 +130,7 @@ async function doReject() {
 
       <div class="action-bar card" v-if="canReview">
         <div class="action-hint">
-          <el-icon><InfoFilled /></el-icon>
+          <span class="hint-icon" aria-hidden="true">ⓘ</span>
           <span>文章正文只读，不能编辑。审核通过后：未设预定时间立即发布，预定时间在未来则进入待发布。</span>
         </div>
         <div class="action-buttons">
@@ -234,4 +234,5 @@ async function doReject() {
 }
 
 .content :deep(.markdown-body) { font-size: 14px; }
+.hint-icon { font-size: 15px; line-height: 1; }
 </style>
