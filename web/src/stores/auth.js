@@ -3,9 +3,16 @@
 import { defineStore } from 'pinia'
 import { logout as logoutApi } from '@/api/auth'
 
-// 写死的管理员只在契约 mock 模式下生效；正式构建初始为未登录，等 F 接 GET /api/auth/me
-const MOCK_ADMIN = { id: 1, username: 'admin', role: 'ADMIN', created_at: '2026-10-19T00:00:00+08:00' }
-const initialUser = () => (import.meta.env.VITE_USE_MOCK === 'true' ? { ...MOCK_ADMIN } : null)
+// 写死的 mock 用户只在契约 mock 模式下生效；正式构建初始为未登录，等 F 接 GET /api/auth/me。
+// 临时开关 VITE_MOCK_ROLE（EDITOR / ADMIN，默认 ADMIN）：F 的 auth mock 合入前用来验收编辑端菜单，
+// 例如 VITE_MOCK_ROLE=EDITOR npm run dev。F 的 auth mock 合入后连同 MOCK_USERS 一起删除。
+const MOCK_USERS = {
+  ADMIN: { id: 1, username: 'admin', role: 'ADMIN', created_at: '2026-10-19T00:00:00+08:00' },
+  EDITOR: { id: 11, username: 'zhangsan', role: 'EDITOR', created_at: '2026-10-19T00:00:00+08:00' },
+}
+export const mockUserFor = (role) => ({ ...(MOCK_USERS[role] || MOCK_USERS.ADMIN) })
+const initialUser = () =>
+  import.meta.env.VITE_USE_MOCK === 'true' ? mockUserFor(import.meta.env.VITE_MOCK_ROLE) : null
 
 export const useAuth = defineStore('auth', {
   state: () => ({
