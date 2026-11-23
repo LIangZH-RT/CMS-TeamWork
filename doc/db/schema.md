@@ -705,12 +705,12 @@ WHERE m.id = ?;
 
 ## 10. 人 × 表
 
-图例：**W** 所有者（本人 Mapper 写）；**w** 经所有者的 Service 写；**R** 本模块 SQL 只读 / 联表。与 `doc/context/team-division.md` 一致。2026-11-23 修订：#36 / #37（角色、权限点只读）移给 G（决策 T8），G 增加 `permission`、`role_permission` 两张只读表；G 的状态机经 C 的 `ArticleRepository` 改 `article.status`，记为 **w**（原写作「**W**(状态列)」，与"每张表只有一个所有者"矛盾）。
+图例：**W** 所有者（本人 Mapper 写）；**w** 经所有者的 Service 写；**R** 本模块 SQL 只读 / 联表。与 `doc/context/team-division.md` 一致。2026-11-23 修订：#36 / #37（角色、权限点只读）移给 G（决策 T8），G 增加 `permission`、`role_permission` 两张只读表；G 的状态机经 C 的 `ArticleRepository` 改 `article.status`，记为 **w**（原写作「**W**(状态列)」，与"每张表只有一个所有者"矛盾）。归属 scope 与 `ArticleOwnershipInterceptor` 由 B 移给 F：B 不再读 `article`（6 → 5）；F 原本就读 `article`，仍为 4 张。
 
 | 人 | role | permission | role_permission | user | login_throttle | category | tag | article | article_tag | media_format | media_file | media_purge_job | reject_category | review_standard | audit_log | sys_operation_log | 合计 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | A | | | | | | R | R | R | R | R | R | | | | | | **6** |
-| B | **W** | **W** | **W** | **W** | **W** | | | R | | | | | | | | | **6** |
+| B | **W** | **W** | **W** | **W** | **W** | | | | | | | | | | | | **5** |
 | C | | | | R | | R | R | **W** | w | R | w | w | | | R | | **9** |
 | D | | | | R | | R | R | w | R | | R | | **W** | **W** | w | | **9** |
 | E | | | | | | | | R/w | | **W** | **W** | **W** | | | w | | **5** |

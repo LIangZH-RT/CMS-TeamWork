@@ -228,7 +228,8 @@ src/main/java/com/liang/cms/
 ├── auth/            登录、登出、注册；AuthInterceptor、CsrfInterceptor、CurrentUserHolder（v2.6 修订）
 ├── security/        授权（v2.6）：@RequiresPermission、PermissionAspect、PermissionCoverageChecker、
 │                    PermissionService（每请求加载权限集）、OwnershipGate、
-│                    ArticleScopeBinder、ArticleScopeContext（唯一设置 scope 的地方）
+│                    ArticleScopeBinder、ArticleScopeContext（唯一设置 scope 的地方）、
+│                    ArticleOwnershipInterceptor（这三个归属类由 F 负责，其余由 B 负责）
 ├── system/          系统管理（v2.6）：用户列表 / 启停 / 角色分配与角色、权限点只读（G）、操作日志查询（H）
 ├── article/         文章聚合：Controller、Service、Repository、Mapper、Entity、DTO、状态机
 ├── taxonomy/        分类与标签
@@ -440,7 +441,7 @@ web/
 | 闸门 | 判断的问题 | 输入 | 实现（v2.6） | 失败结果 |
 |---|---|---|---|---|
 | 权限闸 | 你的角色有这个接口声明的权限点吗 | 当前用户角色的权限集 + 方法上的 `@RequiresPermission("review:approve")` | `PermissionAspect`（`@Around`，B） | 404 |
-| 归属闸 | 这条数据是你的吗 | `article.author_id` vs 当前用户；是否持有 `article:read:all` | `ArticleScopeBinder` + MP `InnerInterceptor` + `ArticleRepository` 写路径收口（§5.3） | 404 |
+| 归属闸 | 这条数据是你的吗 | `article.author_id` vs 当前用户；是否持有 `article:read:all` | `ArticleScopeBinder` + MP `InnerInterceptor`（F）+ `ArticleRepository` 写路径收口（C）（§5.3） | 404 |
 | 状态闸 | 当前状态允许这个动作吗 | `article.status` + 目标迁移 | 状态机的条件 UPDATE（G） | 409 |
 
 **权限闸与归属闸失败一律返回 404，响应与"资源不存在"逐字节一致；状态闸失败返回 409。** 若权限闸返回 403、归属闸返回 404，攻击者仅凭状态码就能分辨"这篇文章存在但不是你的"，等于泄露资源存在性；能走到状态闸说明前两闸已过、请求者对该资源的可见性本来确定，因此 409 不泄露新信息（SRS §4.4）。
@@ -482,6 +483,8 @@ flowchart LR
 **批量接口**（#40～#42）：方法级权限闸只判一次（`review:approve` 等）；归属闸与状态闸对每条目在独立事务里判定（§6.5），逐条结果遵守同一 404 收口。
 
 ### 5.3 归属隔离的落地（本节是全文最重的一节）
+
+**负责人：F**（2026-11-23 由 B 移交；拦截器注册顺序与权限集由 B 提供，写路径收口由 C 负责）。
 
 BR-ISO-003 要求隔离"在数据层强制执行，漏一处即漏洞"。落地方式是**读路径自动追加 + 写路径收口 + 唯一的 scope 设置点**。
 
