@@ -357,7 +357,7 @@ paths:
       tags:
       - ARTICLE
       summary: 按状态计数【补充】
-      description: '与文章列表同一套归属过滤：编辑只统计本人，管理员统计全部；6 种状态都返回，无文章为 0。不返回 404。
+      description: '与文章列表同一套归属过滤：编辑只统计本人，管理员统计全部；6 种状态都返回，无文章为 0。不返回 404。筛选参数与文章列表一致（v2.6：keyword、时间范围、一级分类含子分类）。
 
 
         覆盖需求：FR-ARTICLE-003、FR-ARTICLE-006、BR-SEARCH-002、BR-SEARCH-003、X-ISO-03、X-ISO-04'
@@ -365,8 +365,39 @@ paths:
       parameters:
       - $ref: '#/components/parameters/CategoryFilter'
       - $ref: '#/components/parameters/TagIdsFilter'
+      - $ref: '#/components/parameters/KeywordFilter'
       - $ref: '#/components/parameters/TitleFilter'
       - $ref: '#/components/parameters/AuthorFilter'
+      - name: created_from
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: created_to
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: updated_from
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: updated_to
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: published_from
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: published_to
+        in: query
+        schema:
+          type: string
+          format: date-time
       responses:
         '200':
           description: 成功
@@ -3373,8 +3404,7 @@ components:
       properties:
         items:
           type: array
-          minItems: 1
-          maxItems: 50
+          description: 按 article_id 去重后 1～50 条；为空或去重后超过 50 条返回 400 40017（BR-BATCH-002）。
           items:
             type: object
             required:
@@ -3397,9 +3427,7 @@ components:
       properties:
         article_ids:
           type: array
-          minItems: 1
-          maxItems: 50
-          uniqueItems: true
+          description: 去重后 1～50 个；为空或去重后超过 50 个返回 400 40017（BR-BATCH-002）。重复 ID 不报错，按一次处理。
           items:
             type: integer
             format: int64
@@ -3416,9 +3444,7 @@ components:
       properties:
         article_ids:
           type: array
-          minItems: 1
-          maxItems: 50
-          uniqueItems: true
+          description: 去重后 1～50 个；为空或去重后超过 50 个返回 400 40017（BR-BATCH-002）。重复 ID 不报错，按一次处理。
           items:
             type: integer
             format: int64

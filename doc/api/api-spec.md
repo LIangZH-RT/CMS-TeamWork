@@ -62,7 +62,7 @@
 - ID 用 64 位整数（JSON number）。
 - 布尔值用 `true` / `false`，不用 0/1。
 - **空值语义**：SRS 规定「不存在」的字段一律返回 `null`，不得返回空字符串或占位值（6.6、7.2）。集合为空时返回 `[]`。
-- **未知字段**：写接口收到未定义的字段，或收到系统字段（`status`、`author_id`、`published_at`、`created_at`、`updated_at`、`submitted_at`、`version`、`id`）时，一律返回 `400 FIELD_NOT_WRITABLE`，状态和数据都不变。这满足 TU-13 允许的「400 或忽略」中的 400 这一支，比忽略更容易测。【补充：选择 400】
+- **未知字段**：写接口收到未定义的字段时，一律返回 `400 FIELD_NOT_WRITABLE`，状态和数据都不变。**文章写接口**（#7 创建、#9 编辑）收到文章的系统字段（`status`、`author_id`、`published_at`、`created_at`、`updated_at`、`submitted_at`、`version`、`id`）时同样返回 `400 FIELD_NOT_WRITABLE`。系统字段的限制**只针对文章资源**：`status` 在 #34 账号启停、#38 分类启停的请求体里是定义好的可写字段，不受此限（v2.6 修订）。这满足 TU-13 允许的「400 或忽略」中的 400 这一支，比忽略更容易测。【补充：选择 400】
 - **公开接口例外**：公开接口收到未知查询参数（如 `status=DRAFT`）时**忽略**，不报错，也不改变结果集（architecture INV-10、FR-PUBLIC-001 验收③）。
 
 ### 1.3 时间格式
@@ -677,7 +677,7 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
                { "id": 999, "success": false, "code": 40400, "message": "资源不存在" } ] }
 ```
 
-`results` 按请求中去重后的顺序返回；`code` 与对应单条接口的错误码一致（§3.3），不存在与无权都为 `40400`。
+数量校验在**去重之后**由 Service 完成：为空或去重后超过 50 条返回 `400 40017 BATCH_SIZE_INVALID`；请求 DTO 上不要加 `@Size` / `@NotEmpty`，否则只会得到通用的 `40000`。`results` 按请求中去重后的顺序返回；`code` 与对应单条接口的错误码一致（§3.3），不存在与无权都为 `40400`。
 
 ---
 
@@ -1104,10 +1104,14 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `category_id` | int64 | 否 | 按分类 |
+| `category_id` | int64 | 否 | 按分类；为一级分类时包含其子分类（同 #6） |
 | `tag_ids` | int64[] | 否 | 多值，交集语义 |
-| `title` | string | 否 | 标题模糊匹配 |
+| `keyword` | string | 否 | （v2.6）匹配标题或摘要，规则同 #6 |
+| `title` | string | 否 | `keyword` 的别名，同 #6 |
+| `created_from` / `created_to`、`updated_from` / `updated_to`、`published_from` / `published_to` | datetime | 否 | （v2.6）时间范围，左闭右开，同 #6 |
 | `author_id` | int64 | 否 | 管理员可用；编辑传入时与本人条件取交集 |
+
+> 同一组筛选参数传给 #6 与 #32 时，#32 的 `total` 必须等于 #6 不带 `status` 时的 `total`（X-ISO-03「同一结果集」）。
 
 - **响应 200**：6 种状态都返回，没有文章的状态为 `0`；`total` 为 6 项之和。
 
@@ -1618,11 +1622,11 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | 17 | REVIEW | POST | `/api/articles/{id}/reject` | 驳回 | 管理员 | |
 | 18 | REVIEW | POST | `/api/articles/{id}/unpublish` | 下架 | 管理员 | |
 | 19 | AUDIT | GET | `/api/articles/{id}/audit-logs` | 文章留痕 | 归属编辑、管理员 | |
-| 20 | TAX | GET | `/api/categories` | 分类树 | 已登录 | v2.6 改 |
+| 20 | TAX | GET | `/api/categories` | 分类树 | `category:read`（编辑、管理员） | v2.6 改 |
 | 21 | TAX | POST | `/api/categories` | 创建分类 | 管理员 | |
 | 22 | TAX | PUT | `/api/categories/{id}` | 修改分类名称与父分类 | 管理员 | v2.6 改 |
 | 23 | TAX | DELETE | `/api/categories/{id}` | 删除分类 | 管理员 | |
-| 24 | TAX | GET | `/api/tags` | 标签列表 | 已登录 | |
+| 24 | TAX | GET | `/api/tags` | 标签列表 | `tag:read`（编辑、管理员） | |
 | 25 | TAX | POST | `/api/tags` | 创建标签 | 编辑、管理员 | |
 | 26 | TAX | PUT | `/api/tags/{id}` | 修改标签名称 | 编辑、管理员 | |
 | 27 | TAX | DELETE | `/api/tags/{id}` | 删除标签 | 编辑、管理员 | |
@@ -1806,7 +1810,7 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | 3 | 标题、摘要、正文长度上限；每篇标签数量上限 | **已决（2026-11-23）**：标题 ≤ 200 字符、摘要 ≤ 500 字符、正文 ≤ 1 MiB（UTF-8 字节）、驳回意见与下架原因 ≤ 500 字符，超出 `400 PARAM_INVALID`；每篇标签数暂不限 |
 | 4 | 博客前台导航需要分类列表（BR-TAX-003「用于前台导航与面包屑」），但公开白名单只定义了文章列表和详情两个出口 | **已决（2026-11-16）**：不新增公开分类 / 标签接口；#30 增加 `with_facets`，返回全部已发布文章引用的分类与标签（§4.14 `PublicFacets`、§15 冲突 10） |
 | 5 | 接口层状态等枚举用英文还是中文；JSON 字段用 snake_case 还是 camelCase | 英文枚举 + snake_case |
-| 6 | 400 和 409 同时成立时谁优先（如对待审核文章提交一个空标题的编辑） | 角色、归属 404 → 请求格式 400 → 状态 409（§2.3）；删除的二次确认按 SRS 放在 409 之后 |
+| 6 | 400 和 409 同时成立时谁优先（如对待审核文章提交一个空标题的编辑） | 角色、归属 404 → 请求格式 400 → 状态 409（§2.3）；删除的二次确认按 SRS 放在 409 之后。**v2.6 注意**：权限闸改为切面后，请求体格式 400 在权限 / 归属 404 之前，见 #17 |
 | 7 | 登录名存储与返回是保留原样（去空白后）还是统一小写 | **已决（2026-11-23）**：只存小写规范形式，返回也是它 |
 | 8 | 后台文章列表的默认排序（SRS 只规定了审核队列的排序） | `updated_at` 降序；公开列表 `published_at` 降序。v2.6 起支持多字段 `sort`（BR-SEARCH-007） |
 | 9 | 正文里怎样认定一个链接是「视频链接」？SRS 要求视频链接必须是绝对 https、相对路径的视频链接要拒绝，但又允许普通链接用站内相对地址，而 Markdown 语法上两者没有区别 | **已决（2026-11-16）**：按目标路径扩展名认定，`.mp4` / `.webm` / `.ogg` 即视频链接，必须绝对 https，否则 400（§6.0 规则 5）；博客前台对这类链接内嵌 `<video controls preload="metadata">`，不自动播放、不用 iframe |
@@ -1825,7 +1829,7 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 
 **新增接口 #33～#44**：见 §13。
 
-**改动的 11 个接口**：
+**改动的 16 个接口**（12 行，同类合并）：
 
 | # | 改动 |
 |---|---|
@@ -1840,6 +1844,7 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | #24 / #27 标签 | 列表加 `sort`；删除为逻辑删除 |
 | #28 上传 | 保存并返回 `original_name`、`download_url` |
 | #30 公开列表 | 分类导航只含启用分类树；一级分类含子分类；`sort` 仅允许 `published_at` |
+| #32 计数 | 筛选参数与 #6 对齐：加 `keyword`（`title` 为别名）与三组时间范围，一级分类含子分类 |
 
 **新增错误码 7 个**：`40015 CATEGORY_DISABLED`、`40016 CATEGORY_DEPTH_EXCEEDED`、`40017 BATCH_SIZE_INVALID`、`40018 SORT_FIELD_INVALID`、`40908 CATEGORY_HAS_CHILDREN`、`40909 LAST_ADMIN`、`40910 ROLE_CHANGE_FORBIDDEN`。权限不足仍为 `404 40400`。
 
