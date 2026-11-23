@@ -12,6 +12,10 @@ export const MENU = [
   { route: 'admin-articles', label: '全部文章' },
   { route: 'admin-categories', label: '分类管理' },
   { route: 'admin-tags', label: '标签管理' },
+  { route: 'admin-users', label: '用户管理' },
+  { route: 'admin-roles', label: '角色与权限' },
+  { route: 'admin-oplogs', label: '操作日志' },
+  { route: 'admin-profile', label: '个人资料' },
 ]
 
 // 各角色的后台首页；未注册时回退到该角色菜单里第一个已注册的项
@@ -34,6 +38,19 @@ export function canEnter(router, name, role) {
 export function menuFor(role, router) {
   if (!role) return []
   return MENU.filter((item) => canEnter(router, item.route, role))
+}
+
+/** 登录用户的菜单：先按角色，再按 /me 返回的权限点（FR-AUTH-005）。没有 permissions 时只看角色。 */
+export function menuForUser(user, router) {
+  const base = menuFor(user?.role, router)
+  if (!Array.isArray(user?.permissions)) return base
+  return base.filter((item) => {
+    const record = router.getRoutes().find((r) => r.name === item.route)
+    const need = record?.meta?.permission
+    if (!need) return true
+    const list = Array.isArray(need) ? need : [need]
+    return list.some((code) => user.permissions.includes(code))
+  })
 }
 
 /** 角色的后台首页 { name }；该角色一个可进入的菜单项都没有（含未知角色）时返回 null */

@@ -7,8 +7,14 @@ import 'highlight.js/styles/github.css'
 import App from './App.vue'
 import router from './router'
 import { setupMarkdown } from './utils/markdown-setup'
+import { permissionDirective } from './directives/permission'
 import './styles/base.css'
 
 setupMarkdown()
 
-createApp(App).use(createPinia()).use(router).use(ElementPlus, { locale: zhCn }).mount('#app')
+createApp(App)
+  .use(createPinia())
+  .use(router)
+  .use(ElementPlus, { locale: zhCn })
+  .directive('permission', permissionDirective)
+  .mount('#app')

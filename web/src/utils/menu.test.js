@@ -31,12 +31,14 @@ function fullRouter() {
 const labels = (items) => items.map((i) => i.label)
 
 describe('menuFor：按角色和已注册路由生成菜单', () => {
-  it('ADMIN：审核队列、全部文章、分类管理、标签管理', () => {
-    expect(labels(menuFor('ADMIN', appRouter))).toEqual(['审核队列', '全部文章', '分类管理', '标签管理'])
+  it('ADMIN：审核、文章、分类标签、用户、角色、日志与资料', () => {
+    expect(labels(menuFor('ADMIN', appRouter))).toEqual([
+      '审核队列', '全部文章', '分类管理', '标签管理', '用户管理', '角色与权限', '操作日志', '个人资料',
+    ])
   })
 
-  it('EDITOR：编辑端页面未注册时只有标签管理', () => {
-    expect(labels(menuFor('EDITOR', appRouter))).toEqual(['标签管理'])
+  it('EDITOR：我的文章、写文章、标签管理、个人资料', () => {
+    expect(labels(menuFor('EDITOR', appRouter))).toEqual(['我的文章', '写文章', '标签管理', '个人资料'])
   })
 
   it('EDITOR：编辑端页面注册后为我的文章、写文章、标签管理', () => {
@@ -63,8 +65,8 @@ describe('homeRouteFor', () => {
     expect(homeRouteFor('EDITOR', fullRouter())).toEqual({ name: 'admin-my-articles' })
   })
 
-  it('首选路由未注册时回退到菜单第一项；什么都没有返回 null', () => {
-    expect(homeRouteFor('EDITOR', appRouter)).toEqual({ name: 'admin-tags' })
+  it('首选路由已注册时用它；未知角色没有菜单时返回 null', () => {
+    expect(homeRouteFor('EDITOR', appRouter)).toEqual({ name: 'admin-my-articles' })
     expect(homeRouteFor('AUDITOR', appRouter)).toBeNull()
   })
 })
