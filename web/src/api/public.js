@@ -40,17 +40,17 @@ const pickFacets = (f) =>
  * @param {{page?: number, page_size?: number, category_id?: string|null, tag_ids?: string[], q?: string, with_facets?: boolean}} p
  * ID 以字符串传递，避免 int64 在 JS 里丢精度；q 为标题 + 摘要关键字（§11.1，范围延伸）
  */
-export async function listPublicArticles({ page = 1, page_size = PUBLIC_PAGE_SIZE, category_id = null, tag_ids = [], q = '', with_facets = false } = {}) {
-  const data = await http.get('/api/public/articles', {
-    params: {
-      page,
-      page_size,
-      category_id: category_id || undefined,
-      tag_ids: tag_ids.length ? tag_ids : undefined,
-      q: q || undefined,
-      with_facets: with_facets ? true : undefined,
-    },
-  })
+export async function listPublicArticles({ page = 1, page_size = PUBLIC_PAGE_SIZE, category_id = null, tag_ids = [], q = '', with_facets = false, sort = 'desc' } = {}) {
+  const params = {
+    page,
+    page_size,
+    category_id: category_id || undefined,
+    tag_ids: tag_ids.length ? tag_ids : undefined,
+    q: q || undefined,
+    with_facets: with_facets ? true : undefined,
+  }
+  if (sort === 'asc') params.sort = 'published_at,asc'
+  const data = await http.get('/api/public/articles', { params })
   return {
     items: (data.items || []).map(pickListItem),
     page: data.page,

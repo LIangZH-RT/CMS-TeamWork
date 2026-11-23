@@ -4,16 +4,17 @@
 import { computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePublicList } from '@/composables/usePublicList'
-import { parseSearchQuery, toggleTag, toSearchRouteQuery } from '@/utils/query'
+import { parseSearchQuery, parseSort, toggleTag, toSearchRouteQuery } from '@/utils/query'
 import ArticleGrid from '@/components/ArticleGrid.vue'
 import ActiveTagFilters from '@/components/ActiveTagFilters.vue'
 import TagFilterPanel from '@/components/TagFilterPanel.vue'
 import AboutCard from '@/components/AboutCard.vue'
+import PublishSort from '@/components/PublishSort.vue'
 
 const route = useRoute()
 const router = useRouter()
 
-const filter = computed(() => parseSearchQuery(route.query))
+const filter = computed(() => ({ ...parseSearchQuery(route.query), sort: parseSort(route.query) }))
 const { state, result, reload } = usePublicList(() =>
   route.name === 'blog-search' && filter.value.q ? filter.value : null,
 )
@@ -31,6 +32,7 @@ const pickCategory = (c) => router.push({ name: 'blog-category', params: { id: S
 const onToggleTag = (t) => go(toggleTag(filter.value, t.id))
 const clearTags = () => go({ ...filter.value, page: 1, tag_ids: [] })
 const onPage = (p) => go({ ...filter.value, page: p })
+const onSort = (sort) => go({ ...filter.value, page: 1, sort })
 </script>
 
 <template>
@@ -49,6 +51,7 @@ const onPage = (p) => go({ ...filter.value, page: p })
     <div class="body">
       <div class="list">
         <template v-if="filter.q">
+          <PublishSort :sort="filter.sort" @change="onSort" />
           <ActiveTagFilters :tag-ids="filter.tag_ids" :total="state === 'ready' ? result.total : null" @toggle="onToggleTag" @clear="clearTags" />
           <ArticleGrid
             :state="state"
