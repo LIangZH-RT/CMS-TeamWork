@@ -43,3 +43,11 @@ export function homeRouteFor(role, router) {
   const first = menuFor(role, router)[0]
   return first ? { name: first.route } : null
 }
+
+// 顶栏角色标签，文案按 api-spec §3.1
+export const ROLE_LABEL = { EDITOR: '内容编辑', ADMIN: '管理员' }
+
+/** 菜单项是否高亮：当前路由就是它，或当前路由用 meta.menu 指向它（详情、留痕等子页面） */
+export function isMenuActive(item, route) {
+  return route?.name === item.route || route?.meta?.menu === item.route
+}
