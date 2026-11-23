@@ -202,16 +202,16 @@ Quartz 的持久化调度（或任何"发布任务表"方案）会引入一个�
 
 | 事项 | 做法 | 负责 |
 |---|---|---|
-| 启动入口 | `src/main/webapp/WEB-INF/web.xml` 声明唯一的 `DispatcherServlet`（`contextClass` = `AnnotationConfigWebApplicationContext`，`contextConfigLocation` = `com.liang.cms.config.AppConfig`，`load-on-startup` = 1），并声明 `CharacterEncodingFilter`（UTF-8）、`<multipart-config>`（单文件 20 MB、单请求 25 MB）与 `<session-config>`（§5.1）。没有 `main` 方法 | A |
-| 容器（T7） | **只用一个 Spring 容器**：全部配置类都由 `DispatcherServlet` 的 WebApplicationContext 装载，**不配 `ContextLoaderListener` 父容器**。理由：本项目只有一个 `DispatcherServlet`，父子容器没有收益；而父子容器最常见的坑——切面、`@Transactional` 或 `@Async` 声明在一个容器、目标 Bean 在另一个容器，于是静默失效——会直接让权限闸与操作日志失效。报告里说明 `ContextLoaderListener` 的作用与本项目不用它的理由 | A |
-| 配置类 | `AppConfig`（`@Configuration` + `@ComponentScan("com.liang.cms")` + `@PropertySource`）汇总：`DataSourceConfig`（HikariCP、`DataSourceTransactionManager`、`@EnableTransactionManagement`）、`MybatisPlusConfig`（`MybatisSqlSessionFactoryBean`、插件链、`MetaObjectHandler`、`@MapperScan`）、`FlywayConfig`、`WebMvcConfig`（`@EnableWebMvc`：拦截器注册、Jackson、校验器、`StandardServletMultipartResolver`）、`AopConfig`（`@EnableAspectJAutoProxy(proxyTargetClass = true)`）、`SchedulingConfig`（`@EnableScheduling`、`@EnableAsync` 与线程池） | A 建骨架，各配置类由归属人补全 |
-| 外部配置 | `src/main/resources/application.properties` 经 `@PropertySource` 读入（数据库连接、`cms.storage.root` 等），口令类取值允许用环境变量覆盖。不用 `application.yml`，那是 Boot 的约定 | A |
-| Flyway（T5） | `FlywayConfig` 定义 `@Bean(initMethod = "migrate") Flyway`，`SqlSessionFactory` 以 `@DependsOn("flyway")` 保证先迁移、后建会话工厂。迁移脚本放 `classpath:db/migration`，由迁移账号（有 DDL 权限）执行；应用账号只持有 §2.5 的 DML 权限。Flyway 10 起 MySQL 支持在单独的 `flyway-mysql` 模块里 | C |
+| 启动入口 | `src/main/webapp/WEB-INF/web.xml` 声明唯一的 `DispatcherServlet`（`contextClass` = `AnnotationConfigWebApplicationContext`，`contextConfigLocation` = `com.liang.cms.config.AppConfig`，`load-on-startup` = 1），并声明 `CharacterEncodingFilter`（UTF-8）、`<multipart-config>`（单文件 20 MB、单请求 25 MB）与 `<session-config>`（§5.1）。没有 `main` 方法 | B |
+| 容器（T7） | **只用一个 Spring 容器**：全部配置类都由 `DispatcherServlet` 的 WebApplicationContext 装载，**不配 `ContextLoaderListener` 父容器**。理由：本项目只有一个 `DispatcherServlet`，父子容器没有收益；而父子容器最常见的坑——切面、`@Transactional` 或 `@Async` 声明在一个容器、目标 Bean 在另一个容器，于是静默失效——会直接让权限闸与操作日志失效。报告里说明 `ContextLoaderListener` 的作用与本项目不用它的理由 | B |
+| 配置类 | `AppConfig`（`@Configuration` + `@ComponentScan("com.liang.cms")` + `@PropertySource`）汇总：`DataSourceConfig`（HikariCP、`DataSourceTransactionManager`、`@EnableTransactionManagement`）、`MybatisPlusConfig`（`MybatisSqlSessionFactoryBean`、插件链、`MetaObjectHandler`、`@MapperScan`）、`FlywayConfig`、`WebMvcConfig`（`@EnableWebMvc`：拦截器注册、Jackson、校验器、`StandardServletMultipartResolver`）、`AopConfig`（`@EnableAspectJAutoProxy(proxyTargetClass = true)`）、`SchedulingConfig`（`@EnableScheduling`、`@EnableAsync` 与线程池） | B 建骨架，各配置类由归属人补全 |
+| 外部配置 | `src/main/resources/application.properties` 经 `@PropertySource` 读入（数据库连接、`cms.storage.root` 等），口令类取值允许用环境变量覆盖。不用 `application.yml`，那是 Boot 的约定 | B |
+| Flyway（T5） | `FlywayConfig` 定义 `@Bean(initMethod = "migrate") Flyway`，`SqlSessionFactory` 以 `@DependsOn("flyway")` 保证先迁移、后建会话工厂。迁移脚本放 `classpath:db/migration`，由迁移账号（有 DDL 权限）执行；应用账号只持有 §2.5 的 DML 权限。Flyway 10 起 MySQL 支持在单独的 `flyway-mysql` 模块里 | B |
 | 认证与 CSRF（T1、T2） | `AuthInterceptor` + `CsrfInterceptor`（`HandlerInterceptor`，§5.1）；密码哈希只引入 `spring-security-crypto` 的 `BCryptPasswordEncoder`，**不引入** `spring-security-web` / `spring-security-config` | B |
 | JSON 与校验 | `WebMvcConfig.configureMessageConverters` 注册统一的 `ObjectMapper`（`JavaTimeModule`、`snake_case`、时间格式按 api-spec §3）；`LocalValidatorFactoryBean`（Hibernate Validator）作为 MVC 校验器 | H |
 | 全局异常与 404 | `@RestControllerAdvice` 统一返回体；不存在的路径由 `NoHandlerFoundException`（Spring 6.1 起默认抛出）/ `NoResourceFoundException` 转成 `404 40400`；不开默认 Servlet 的静态资源映射 | H |
-| 部署（T4） | Maven `packaging = war`，`jakarta.servlet-api` 为 `provided`；部署到外部 **Tomcat 10.1**（Jakarta EE 10，Spring 6.2 支持）；Nginx 反向代理 `/api/**` 到 Tomcat。开发期用 IDE 的 Tomcat 运行配置 | A |
-| 版本（T6） | Spring Framework 6.2.x + JDK 21；MyBatis-Plus 用非 Boot 依赖（`com.baomidou:mybatis-plus` + `mybatis-spring` 3.x；3.5.9 起分页插件另需 `mybatis-plus-jsqlparser`）；具体补丁版本在 `pom.xml` 定版 | A |
+| 部署（T4） | Maven `packaging = war`，`jakarta.servlet-api` 为 `provided`；部署到外部 **Tomcat 10.1**（Jakarta EE 10，Spring 6.2 支持）；Nginx 反向代理 `/api/**` 到 Tomcat。开发期用 IDE 的 Tomcat 运行配置 | B |
+| 版本（T6） | Spring Framework 6.2.x + JDK 21；MyBatis-Plus 用非 Boot 依赖（`com.baomidou:mybatis-plus` + `mybatis-spring` 3.x；3.5.9 起分页插件另需 `mybatis-plus-jsqlparser`）；具体补丁版本在 `pom.xml` 定版 | B |
 
 ---
 
@@ -229,7 +229,7 @@ src/main/java/com/liang/cms/
 ├── security/        授权（v2.6）：@RequiresPermission、PermissionAspect、PermissionCoverageChecker、
 │                    PermissionService（每请求加载权限集）、OwnershipGate、
 │                    ArticleScopeBinder、ArticleScopeContext（唯一设置 scope 的地方）
-├── system/          系统管理（v2.6）：用户列表 / 启停 / 角色分配（G）、角色与权限点只读（B）、操作日志查询（H）
+├── system/          系统管理（v2.6）：用户列表 / 启停 / 角色分配与角色、权限点只读（G）、操作日志查询（H）
 ├── article/         文章聚合：Controller、Service、Repository、Mapper、Entity、DTO、状态机
 ├── taxonomy/        分类与标签
 ├── media/           上传、类型与大小校验、StorageService 实现、媒体交付出口

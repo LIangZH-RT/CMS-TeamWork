@@ -11,7 +11,9 @@
 >
 > v2.6 变化：新增 RBAC 三表与操作日志表（共 16 张）、12 个接口（#33～#44）和两个 AOP 切面。B 做权限切面 + RBAC，H 做操作日志切面，G 加用户管理 #33～#35；其余人各加 1～2 个接口（§0）。每人的重点 Spring 知识点见 §2.5，答辩时各讲自己那部分。
 >
-> 技术栈名称（D12）：报告与 SRS 写"Spring Boot 3（Spring MVC）+ MyBatis-Plus，基于实验二 SSM 升级"；**A 需跟老师确认一次**是否接受。
+> 技术栈名称（D12，2026-11-23 按决策 T1～T9 修订）：报告与 SRS 写"Spring 6 + Spring MVC + MyBatis-Plus（不用 Spring Boot、Spring Security），基于实验二 SSM 升级"；**A 需跟老师确认一次**是否接受（尚未确认）。
+>
+> 2026-11-23 工作量再平衡（决策 T8）：#36/#37 由 B 移给 G（同在 `system/`）；Jackson 消息转换器、校验器装配与不存在路径的 404 映射归 H。
 
 ---
 
@@ -20,15 +22,15 @@
 | 人 | 原分工 | 新分工 | 变化 |
 |---|---|---|---|
 | A | 统筹 / 集成 | 统筹 + **全部前端（`web/`）** + 公开读接口 #30/#31 + 计数 #32 + 接口契约 + 合并审核 + 集成（报告、ApiFox、设计图汇总） | 新增前端与一块后端 |
-| B | 后端基础 + 认证 | M0 工程骨架 + 认证 #1～#5 + RBAC 三表 + `@RequiresPermission` 权限切面与启动检查 + 归属 / scope + #36/#37 | v2.6：闸门改为 AOP 切面，加 RBAC |
+| B | 后端基础 + 认证 | M0 工程骨架（`web.xml` + Java 配置）+ 认证 #1～#5（登录拦截器、CSRF 拦截器）+ RBAC 三表 + `@RequiresPermission` 权限切面与启动检查 + 归属 / scope | v2.6：闸门改为 AOP 切面，加 RBAC；v2.6 修订：去掉 Spring Boot / Security，#36/#37 移给 G |
 | C | 文章 + 公开接口 | 文章 CRUD #6～#10 + 批量删除草稿 #42（`article/` 内容写路径；多维检索、逻辑删除） | **公开接口移交 A**；v2.6 加 #42 |
 | D | 审核流 | 审核 #14～#18 + 批量审核通过 #40、批量下架 #41 | v2.6 加批量（逐条独立事务） |
 | E | 媒体 + 分类标签 + 定时发布 | 媒体 #28/#29 + 下载 #43（实验二延续）+ `task/` 两个后台任务（到期发布、媒体清理） | **分类标签移交 F**；v2.6 加 #43 |
 | F | 前端编辑端（含登录） | **后端**：两级分类 #20～#23、启停 #38、排序 #39；标签 #24～#27（`taxonomy/`） | **前端 → 后端**；v2.6 加多级分类 |
-| G | 前端管理端 | **后端**：状态机 + 提交 / 撤回 / 改期 #11～#13 + 正文校验器 + 用户管理 #33～#35（`system/`） | **前端 → 后端**；v2.6 加用户管理 |
-| H | 测试与部署 | **后端**：`common/` 横切 + 留痕 `audit/`（写入服务、#19、最近驳回 / 下架查询）+ `@OperationLog` 切面与 #44 | **测试 → 后端**；v2.6 加操作日志 |
+| G | 前端管理端 | **后端**：状态机 + 提交 / 撤回 / 改期 #11～#13 + 正文校验器 + 用户管理 #33～#35 + 角色与权限点只读 #36/#37（`system/`） | **前端 → 后端**；v2.6 加用户管理；v2.6 修订接手 #36/#37 |
+| H | 测试与部署 | **后端**：`common/` 横切（含 Jackson、校验器装配与 404 映射）+ 留痕 `audit/`（写入服务、#19、最近驳回 / 下架查询）+ `@OperationLog` 切面与 #44 | **测试 → 后端**；v2.6 加操作日志；v2.6 修订接手 Jackson / 校验 / 404 |
 
-各人拥有的表（字段级定义见 `doc/db/schema.md` §4）：B `role`、`permission`、`role_permission`、`user`、`login_throttle`；C `article`；D `reject_category`、`review_standard`；E `media_format`、`media_file`、`media_purge_job`；F `category`、`tag`、`article_tag`；H `audit_log`、`sys_operation_log`。A、G 不拥有表（G 只写 `article` 的状态列，经 C 的 `ArticleRepository` transition 方法）。
+各人拥有的表（字段级定义见 `doc/db/schema.md` §4）：B `role`、`permission`、`role_permission`、`user`、`login_throttle`；C `article`；D `reject_category`、`review_standard`；E `media_format`、`media_file`、`media_purge_job`；F `category`、`tag`、`article_tag`；H `audit_log`、`sys_operation_log`。A、G 不拥有表（G 只改 `article` 的状态列，经 C 的 `ArticleRepository` transition 方法，记为 w）。
 
 > 之前给 F、G 的前端工作，以及 PR #7 之后的前端工作，全部转给 A 一人。
 
@@ -116,24 +118,24 @@
 - **后端工作量**：约 3～4 人日。
 
 #### B：M0 工程骨架 + 认证 + RBAC + 权限切面
-- **包**：`config/`、`auth/`、`security/`，以及工程本身（`pom.xml` 定版、`application.yml`、Flyway 接入、数据库双账号）。
-- **接口**：#1 `GET /api/auth/csrf`，#2 `POST /api/auth/register`，#3 `POST /api/auth/login`，#4 `POST /api/auth/logout`，#5 `GET /api/auth/me`（v2.6 返回权限点列表），#36 `GET /api/roles`，#37 `GET /api/permissions`。
+- **包**：`config/`、`auth/`、`security/`，以及工程本身（`pom.xml` 定版、`packaging = war`、`web.xml`、`AppConfig` 与各配置类骨架、`application.properties`、Flyway Bean、数据库双账号；arch §2.10）。
+- **接口**：#1 `GET /api/auth/csrf`，#2 `POST /api/auth/register`，#3 `POST /api/auth/login`，#4 `POST /api/auth/logout`，#5 `GET /api/auth/me`（v2.6 返回权限点列表）。#36/#37 已移给 G（决策 T8）。
 - **横切**：
-  - Spring Security 只做认证：`HttpSessionCsrfTokenRepository` + `X-XSRF-TOKEN`、会话 Cookie 属性、空闲 30 分钟 / 绝对 12 小时、登录 5 次失败锁 15 分钟、会话固定防护（arch §5.1、SRS §4.1.2）。
-  - **v2.6**：`@RequiresPermission` 注解 + `PermissionAspect`（`@Around`，`@Order(2)`，失败抛统一 404）+ `PermissionCoverageChecker`（`ApplicationRunner`，启动时检查每个 Controller 方法都有注解或在白名单里）；`PermissionService` 按会话里的 `role_id` 查权限集合（arch §5.2、BR-RBAC-001~005）。
-  - 停用账号的会话在下一次请求返回 401（BR-USER-001），会话失效配合 G 的用户管理。
+  - v2.6 修订（不用 Spring Boot / Security，arch §2.10、§5.1）：单一 `DispatcherServlet` 容器与 `AppConfig`；`DataSource`、`DataSourceTransactionManager`、`MybatisSqlSessionFactoryBean`、`@MapperScan`、Flyway Bean；`AuthInterceptor`（未登录 401、绝对 12 小时、**每请求按 `user_id` 查状态与 `role_id`**）、`CsrfInterceptor`（会话令牌 + `X-XSRF-TOKEN`，403）、`spring-security-crypto` 的 BCrypt、`changeSessionId()` 防会话固定、`web.xml` 会话与 Cookie 配置（空闲 30 分钟、`HttpOnly`、Tomcat `SameSite=Lax`）、登录 5 次失败锁 15 分钟（SRS §4.1.2）。
+  - **v2.6**：`@RequiresPermission` 注解 + `PermissionAspect`（`@Around`，`@Order(2)`，失败抛统一 404）+ `PermissionCoverageChecker`（监听 `ContextRefreshedEvent`，启动时检查每个 Controller 方法都有注解或在白名单里，并断言 Controller 已被 AOP 代理）；`PermissionService` 用 `AuthInterceptor` 本次请求按会话里的 **`user_id`** 查到的 `role_id` 取权限集合，角色和权限都不放进会话（arch §5.2、BR-RBAC-001~005）。
+  - 停用账号的会话在下一次请求返回 401（BR-USER-001）：`AuthInterceptor` 每请求查状态即可，G 的用户管理不需要找出并销毁对方会话。
   - `ArticleScopeBinder`/`ArticleScopeContext`、`ArticleOwnershipInterceptor`（arch §5.3、INV-02、INV-09）；状态闸仍在各 Service（409）。
   - MyBatis-Plus 插件与自动填充：分页、乐观锁、`BlockAttackInnerInterceptor`、`MetaObjectHandler`（`created_at`/`updated_at`）；**M0 验证项**：`@TableLogic(delval = "id")` 在本项目 MP 版本上是否生效（schema §1，不行就用 `setSql("deleted = id")`）。
-- **需求**：FR-AUTH-001~005、FR-USER-001、FR-USER-007、SRS §4.1.1、§4.4、§4.7（BR-RBAC-001~005）。
+- **需求**：FR-AUTH-001~005、FR-USER-001、SRS §4.1.1、§4.4、§4.7（BR-RBAC-001~005）。
 - **表**：
-  - `role` W、`permission` W、`role_permission` W（所有者，V1；运行时只读，切面和 #36/#37 读取）；
+  - `role` W、`permission` W、`role_permission` W（所有者，V1；运行时只读，权限切面读取；G 的 #36/#37 也读）；
   - `user` W（所有者；注册只建 `EDITOR`、登录、管理员种子；G 的用户管理经 B 的 `UserService` 写 `status`/`role_id`）；
   - `login_throttle` W（所有者；按登录名计数和锁定，不存在的登录名也计数，SRS §4.1.2）；
   - `article` R（拦截器改写所有针对 `article` 的 SELECT；归属闸读取 `author_id`）；
   - 另有 `R__app_grants.sql` 的权限接触（`audit_log`、`sys_operation_log` 只能 INSERT/SELECT，INV-04 的落地），不计入表数。
   - 共 **6 张**。
 - **约束**：`security/` 不得依赖任何业务包（arch §3.1）。闸门需要的 `author_id`/`status` 通过 `security` 包里定义的端口接口取得，由 `article/` 实现（C 负责实现）。
-- **工作量**：约 10 人日（全组最深），集中在 M0～M1，M3 之后主要做评审。
+- **工作量**：约 10 人日（全组最深；#36/#37 移出约 −1，手工装配 Spring 与自研拦截器约 +1），集中在 M0～M1，M3 之后主要做评审。
 
 #### C：文章内容写路径
 - **包**：`article/`，具体是 Controller、`ArticleRepository` 的草稿保存和删除方法、DTO、`ArticleFilter`。
@@ -204,29 +206,31 @@
 
 #### G：状态机 + 提交流程 + 正文校验 + 用户管理
 - **包**：`article/flow`，包括 `ArticleStateMachine` 和 `ArticleRepository.transition*` 方法。另外负责 `ContentValidator`，可放 `article/` 或 `media/`，见 §5 R8。
-- **接口**：#11 `POST /api/articles/{id}/submit`，#12 `POST /api/articles/{id}/withdraw`，#13 `POST /api/articles/{id}/reschedule`；v2.6 用户管理 #33 `GET /api/admin/users`、#34 `PUT /api/admin/users/{id}/status`、#35 `PUT /api/admin/users/{id}/role`（`system/` 包）。
-- **用户管理规则**：至少保留一个启用管理员（40909）、有文章的编辑不能升为管理员（40910）、不能操作自己；停用或改角色后，被操作账号的会话在下一次请求生效（与 B 配合，BR-USER-001/002、BR-ROLE-004/005）。
+- **接口**：#11 `POST /api/articles/{id}/submit`，#12 `POST /api/articles/{id}/withdraw`，#13 `POST /api/articles/{id}/reschedule`；v2.6 用户管理 #33 `GET /api/admin/users`、#34 `PUT /api/admin/users/{id}/status`、#35 `PUT /api/admin/users/{id}/role`；v2.6 修订接手 #36 `GET /api/roles`、#37 `GET /api/permissions`（`system/` 包，只读，决策 T8）。
+- **用户管理规则**：至少保留一个启用管理员（40909）、有文章的编辑不能升为管理员（40910）、不能操作自己；停用或改角色后，被操作账号的会话在下一次请求生效（B 的 `AuthInterceptor` 每请求查状态与角色，G 不用维护会话登记表；BR-USER-001/002、BR-ROLE-004/005）。名下文章判定要包含已逻辑删除的文章，手写 SQL（schema USER-03）。并发互相停用 / 降级由 USER-02 的 `FOR UPDATE` 保证（TU-30）。
 - **横切**：
   - 状态机是 `article.status` **唯一的写入口**，覆盖 11 条迁移路径（arch §7、INV-01、X-STATE-01/02）；
   - 提供 `allowedActions(article, actor)`，供 C、A、D 填 `allowed_actions`；
   - `ContentValidator` 实现 api-spec §6.0 的 8 条正文规则（BR-MEDIA-001/006、FR-MEDIA-004）。
-- **需求**：FR-SUBMIT-001~003、FR-USER-002/003/006、BR-001、BR-PUB-008/009、BR-USER-001/002、SRS §4.2.1、§5.2、§5.6。
+- **需求**：FR-SUBMIT-001~003、FR-USER-002/003/006/007、BR-001、BR-PUB-008/009、BR-USER-001/002、SRS §4.2.1、§5.2、§5.6。
 - **表**：
-  - `article` W（只写 `status`/`scheduled_publish_time`/`published_at`，通过 transition 方法；不动 `version`）；
+  - `article` w（只写 `status`/`scheduled_publish_time`/`published_at`，经 C 的 `ArticleRepository.transition*` 方法；不动 `version`）；
   - `audit_log` w（通过 `AuditWriter` 写提交、撤回、改期，改期带新旧预定时间）；
   - `media_file` r（`ContentValidator` 校验正文图片属于本文章且用途为 `INLINE_IMAGE`）；
   - `category` r（提交时做完整性检查，返回 40014）；
   - `review_standard` r（审核类迁移时取当前版本，随留痕写入）；
-  - `user` w（用户管理改 `status`/`role_id`，经 B 的 `UserService`）、`role` R（#33 列表联表取角色名，#35 校验目标角色）。
-  - 共 **7 张**。
-- **工作量**：约 6～7 人日。
+  - `user` w（用户管理改 `status`/`role_id`，经 B 的 `UserService`）、`role` R（#33 列表联表取角色名，#35 校验目标角色，#36 列角色）；
+  - `permission` R、`role_permission` R（#36 角色及其权限点、#37 权限点清单）。
+  - 共 **9 张**。
+- **工作量**：约 7～8 人日。
 
 #### H：common 横切 + 留痕 + 操作日志切面
 - **包**：`common/` 和 `audit/`。
 - **M0 交付**：
   - 统一响应体 `{code,message,data}`；
   - `ErrorCode` 枚举（api-spec §3.3 全表）；
-  - `GlobalExceptionHandler`，保证 404 响应体逐字节一致（INV-09）；
+  - `GlobalExceptionHandler`（`@RestControllerAdvice`），保证 404 响应体逐字节一致（INV-09）；v2.6 修订：没有 Boot 的默认错误处理，要自己覆盖 `NoHandlerFoundException` / `NoResourceFoundException`（不存在的路径 → 404）、`HttpMessageNotReadableException`、`MethodArgumentNotValidException`、`MaxUploadSizeExceededException` 等；
+  - v2.6 修订（决策 T8）：`WebMvcConfig` 里的 Jackson `ObjectMapper`（`JavaTimeModule`、snake_case、时间格式）与 `LocalValidatorFactoryBean` 装配；
   - 分页对象（api-spec §1.5）；
   - 时间格式（§1.3）；
   - 共享枚举：`ArticleStatus`、`AuditAction`、`ActorType`、`Role`、`MediaUsage` 等。数据库和接口同为英文代码，用 MyBatis-Plus `@EnumValue` 直接映射，**不做中英映射**（api-spec §4.1、§15 冲突 9 已结案）。
@@ -243,7 +247,7 @@
   - `article` R（#19 先过 scope 可见性；窗口查询按文章 ID 过滤）；
   - `reject_category` R、`review_standard` R（#19 返回驳回类别与标准版本代码）。
   - 共 **6 张**。
-- **工作量**：约 6 人日。
+- **工作量**：约 6～7 人日（v2.6 修订接手 Jackson / 校验 / 404 映射）。
 
 ### 2.2 人 × 表矩阵
 
@@ -257,10 +261,10 @@
 | D | | | | R | | R | R | w | R | | R | | **W** | **W** | w | | **9** | V8 |
 | E | | | | | | | | R/w | | **W** | **W** | **W** | | | w | | **5** | V7 |
 | F | | | | | | **W** | **W** | R | **W** | | | | | | | | **4** | V4、V6 |
-| G | R | | | w | | R | | **W**(状态列) | | | R | | | R | w | | **7** | 无 |
+| G | R | R | R | w | | R | | w | | | R | | | R | w | | **9** | 无 |
 | H | | | | R | | | | R | | | | | R | R | **W** | **W** | **6** | V9、V10 |
 
-- 每人真实读写的表都 ≥ 3 张；每张表只有一个所有者（W）。G 的「W(状态列)」是经 C 的 `ArticleRepository.transition*` 方法写，`article` 的所有者仍是 C。
+- 每人真实读写的表都 ≥ 3 张；每张表只有一个所有者（W）。G 改 `article` 状态列经 C 的 `ArticleRepository.transition*` 方法，记为 w，`article` 的所有者是 C。
 - `sys_operation_log` 只由 H 的切面写，其他人只在 Controller 方法上加 `@OperationLog`，不计入表数。`R__app_grants` 的权限接触也不计入。
 
 ### 2.3 接口覆盖核对（44 / 44）
@@ -268,37 +272,37 @@
 | 人 | 接口编号 | 个数 |
 |---|---|---|
 | A | #30、#31、#32 | 3 |
-| B | #1～#5、#36、#37 | 7 |
+| B | #1～#5（+ 工程骨架、登录与 CSRF 拦截器、权限切面） | 5 |
 | C | #6～#10、#42 | 6 |
 | D | #14～#18、#40、#41 | 7 |
 | E | #28、#29、#43（+ 2 个后台任务） | 3 |
 | F | #20～#27、#38、#39 | 10 |
-| G | #11～#13、#33～#35（+ 状态机、正文校验器） | 6 |
+| G | #11～#13、#33～#37（+ 状态机、正文校验器） | 8 |
 | H | #19、#44（+ common、AuditWriter、LatestTrailQuery、操作日志切面） | 2 |
 | 合计 | | **44** |
 
 ### 2.4 共享骨架的归属与顺序（M0）
 
-1. **B**：`pom.xml` 定版（Spring Boot 3.x、MyBatis-Plus、Flyway、MySQL 驱动；版本号见 arch §9.3）、包根 `com.liang.cms` 和 arch §3.1 的空包、`application.yml`（`cms.storage.root`、`cms.publish.scan-interval`）、Flyway 接入、迁移账号和应用账号分离、Security 过滤链骨架（CSRF、会话、401 入口）。
+1. **B**：`pom.xml` 定版（`packaging = war`；Spring Framework 6.2、MyBatis-Plus 非 Boot 依赖、Flyway、MySQL 驱动、HikariCP、`spring-security-crypto`；**不引入任何 `spring-boot-*` 与 `spring-security-web` / `-config`**；版本号见 arch §9.3）、包根 `com.liang.cms` 和 arch §3.1 的空包、`web.xml` 与 `AppConfig` 及各配置类骨架（arch §2.10）、`application.properties`（`cms.storage.root`、`cms.publish.scan-interval`）、Flyway Bean、迁移账号和应用账号分离、拦截器骨架（`AuthInterceptor` 401、`CsrfInterceptor` 403）、Tomcat 10.1 本地运行说明。
 2. **H**（和 1 并行）：`common/` 全部，内容见 §2.1 H。
-3. **各表所有者**（和 1、2 并行）：核对 `doc/db/schema.md` 里本表的规格（有异议提 Issue，A 决定），然后按 §1.3 的顺序写 `V1`～`V11`。参考 DDL 已在本地 MySQL 8.4.6 空库跑通（51 项正反例，schema 附录 A.1），可以直接拆用。
+3. **各表所有者**（和 1、2 并行）：核对 `doc/db/schema.md` 里本表的规格（有异议提 Issue，A 决定），然后按 §1.3 的顺序写 `V1`～`V11`。参考 DDL 已在本地 MySQL 8.4.6 空库跑通（52 项正反例，schema 附录 A.1），可以直接拆用。
 4. **B**：RBAC 三表、MP 自动填充与逻辑删除验证（`delval = "id"`）、`@RequiresPermission` 注解定义；随后 `security/` 权限切面、scope 和归属拦截器。端口接口先合入，C 再实现它。
 5. **H**：`@OperationLog` 注解定义（M0，和 B 的注解一起合入，方便各人在 Controller 上先加注解）；`AuditWriter`，必须在 D、E、G 开工前合入。
 
-### 2.5 每人的重点 Spring 知识点（v2.6）
+### 2.5 每人的重点 Spring 知识点（v2.6；2026-11-23 按纯 Spring MVC 修订）
 
-答辩时每人讲自己这一行；工作量是相对值。
+答辩时每人讲自己这一行；工作量是相对值。没有 Spring Boot 之后，「自动配置」不再是知识点，换成「手工装配」：每个 Bean 都要在配置类里显式声明，这部分在报告里可以和实验二的 XML 配置对照着讲。
 
 | 人 | 模块与接口 | 重点 Spring 知识点 | 工作量 |
 |---|---|---|---|
 | A | 全部前端；公开接口 #30 #31、计数 #32；接口契约、ApiFox、报告汇总、合并审核 | MVC 只读接口、DTO 白名单、MP 分页与 XML、分类树查询 | 前端重；后端轻 |
-| B | M0 工程骨架（多环境 yml、Flyway、MP 插件、自动填充）；Security 认证 / 会话 / CSRF；认证 #1～#5；RBAC 三表；`@RequiresPermission` 切面与启动检查；归属拦截器；#36 #37 | **IoC/DI 与自动配置**、`SecurityFilterChain`、**AOP（`@Around`、切点表达式、注解反射）**、`ApplicationRunner`、MP `InnerInterceptor` | 重（全组最深） |
-| C | 文章 #6～#10、批量删除 #42；多维检索与排序；逻辑删除；乐观锁 | MVC 参数绑定与 `@Validated` 分组、`@Transactional`、MP Wrapper / `@Version` / `@TableLogic`、N+1 优化 | 重 |
+| B | M0 工程骨架（`web.xml`、`AppConfig`、数据源与事务、Flyway Bean、MP 插件、自动填充）；登录与 CSRF 拦截器、会话；认证 #1～#5；RBAC 三表；`@RequiresPermission` 切面与启动检查；归属拦截器 | **IoC/DI 与手工装配**（`web.xml` + `DispatcherServlet`、`@Configuration` / `@Bean` / `@ComponentScan` / `@PropertySource`；`ContextLoaderListener` 父子容器的作用与本项目只用一个容器的理由）、`DataSourceTransactionManager` + `@EnableTransactionManagement`、`MybatisSqlSessionFactoryBean` + `@MapperScan`、**`HandlerInterceptor`**（认证、CSRF、执行顺序）、**AOP（`@Around`、切点表达式、注解反射、`@EnableAspectJAutoProxy`）**、`ContextRefreshedEvent`、MP `InnerInterceptor` | 重（全组最深） |
+| C | 文章 #6～#10、批量删除 #42；多维检索与排序；逻辑删除；乐观锁 | MVC 参数绑定与 `@Validated` 分组、`@Transactional`、MP Wrapper / `@Version` / `@TableLogic`、保存端 `FOR SHARE` 校验分类标签（TAX-03）、N+1 优化 | 重 |
 | D | 审核 #14～#18、批量 #40 #41；两张字典表 | **事务传播**（批量逐条 `REQUIRES_NEW` / `TransactionTemplate`）、**自调用导致事务失效**的代理问题、窗口函数 XML | 中偏重 |
-| E | 媒体上传 #28、出口 #29、下载 #43（实验二延续）；到期发布与清理任务 | `MultipartFile`、`StorageService` 接口多实现（`@ConditionalOnProperty`）、`Resource` / `ResourceRegion` 流式、`ContentDisposition`、`@Scheduled`、`@TransactionalEventListener(AFTER_COMMIT)` 删文件 | 中 |
+| E | 媒体上传 #28、出口 #29、下载 #43（实验二延续）；到期发布与清理任务 | `MultipartFile`、`StandardServletMultipartResolver` + `web.xml` `<multipart-config>`（对照实验二的 `CommonsMultipartResolver`，说明 Spring 6 为什么删除它）、`StorageService` 接口多实现（`@Profile`）、`Resource` / `ResourceRegion` 流式、`ContentDisposition`、`@Scheduled`、`@TransactionalEventListener(AFTER_COMMIT)` 删文件 | 中 |
 | F | 两级分类 #20～#23、#38 #39；标签 #24～#27；文章-标签关联 | 自定义校验注解（`ConstraintValidator`）、`@Transactional` + `SELECT … FOR UPDATE`、树结构组装、逻辑删除与唯一键、`saveBatch` | 中 |
-| G | 状态机、提交 / 撤回 / 改期 #11～#13、正文校验；用户管理 #33～#35 | 策略 / 状态模式的 Bean 注册（`Map<String, Handler>` 注入）、条件 UPDATE、`ApplicationEvent`、会话失效（`SessionRegistry`，配合 B） | 中 |
-| H | common（统一响应、错误码、`@RestControllerAdvice`、枚举）；`AuditWriter` 与 #19；`@OperationLog` 切面与 #44 | **AOP + SpEL**（`@OperationLog(target = "#id")`）、`@Async` + `REQUIRES_NEW` 独立事务写日志、全局异常、`ResponseBodyAdvice`（可选） | 中 |
+| G | 状态机、提交 / 撤回 / 改期 #11～#13、正文校验；用户管理 #33～#35；角色与权限点只读 #36 #37 | 策略 / 状态模式的 Bean 注册（`Map<String, Handler>` 注入）、条件 UPDATE、`ApplicationEvent`、`SELECT … FOR UPDATE` 防并发停用最后一个管理员、绕过 `@TableLogic` 的手写 SQL（USER-03）；停用即时生效靠 B 的拦截器每请求查状态，不用会话登记表 | 中偏重 |
+| H | common（统一响应、错误码、`@RestControllerAdvice`、枚举、Jackson 与校验器装配、404 映射）；`AuditWriter` 与 #19；`@OperationLog` 切面与 #44 | **AOP + SpEL**（`@OperationLog(target = "#id")`，现在也覆盖登录和登出）、`@EnableAsync` + 线程池 Bean + `REQUIRES_NEW` 独立事务写日志、全局异常（自己覆盖 `NoHandlerFoundException`、`HttpMessageNotReadableException`、`MethodArgumentNotValidException`）、`configureMessageConverters` 手配 `ObjectMapper`、`LocalValidatorFactoryBean`、`ResponseBodyAdvice`（可选） | 中 |
 
 **AOP 由两人分担**：B 做权限切面、H 做日志切面，答辩时两人都能讲。切面顺序用 `@Order` 约定：如果权限切面在外、日志切面在内，权限失败时日志切面根本不会执行，就漏记了；所以**日志切面 `@Order(1)` 在最外层、权限切面 `@Order(2)` 在内**，权限失败也能留下一条失败日志（arch §5.2、§5.7）。
 
@@ -390,9 +394,9 @@
 
 | 里程碑 | 内容 | 负责人 | 前置 |
 |---|---|---|---|
-| **M0 骨架** | 工程、`pom`、多环境配置、Flyway、双账号、Security 骨架、MP 插件与自动填充、`deleted` 验证；`common/` + `@RequiresPermission`/`@OperationLog` 两个注解定义；16 张表的迁移 V1～V11、`R__app_grants` | B、H、各表所有者 | 表规格已定（`doc/db/schema.md` v2，2026-11-23） |
-| **M1 认证 + 权限 + 分类标签 + 日志** | #1～#5、#36/#37；权限切面与启动检查、scope、归属拦截器；两级分类与标签 #20～#27、#38/#39；操作日志切面与 #44；`AuditWriter` | B、F、H | M0 |
-| **M2 文章 + 媒体 + 用户管理** | #6～#10、#42（含逻辑删除、多维检索）；#28/#29/#43、`MediaRefService`；`ContentValidator`；状态机骨架和 `allowedActions`；用户管理 #33～#35 | C、E、G | M1（切面、`TaxonomyService`、`AuditWriter`） |
+| **M0 骨架** | 工程、`pom`（WAR）、`web.xml` 与 Java 配置、Flyway Bean、双账号、拦截器骨架、MP 插件与自动填充、`deleted` 验证；`common/` + `@RequiresPermission`/`@OperationLog` 两个注解定义；16 张表的迁移 V1～V11、`R__app_grants` | B、H、各表所有者 | 表规格已定（`doc/db/schema.md` v2，2026-11-23） |
+| **M1 认证 + 权限 + 分类标签 + 日志** | #1～#5；权限切面与启动检查、scope、归属拦截器；两级分类与标签 #20～#27、#38/#39；操作日志切面与 #44；`AuditWriter` | B、F、H | M0 |
+| **M2 文章 + 媒体 + 用户管理** | #6～#10、#42（含逻辑删除、多维检索）；#28/#29/#43、`MediaRefService`；`ContentValidator`；状态机骨架和 `allowedActions`；用户管理 #33～#35、角色与权限点 #36/#37 | C、E、G | M1（切面、`TaxonomyService`、`AuditWriter`） |
 | **M3 审核 + 发布** | #11～#13；#14～#18（含立即发布）、批量 #40/#41；到期发布任务 | G、D、E | M2 |
 | **M4 公开 + 留痕 + 联调 + 报告** | #30/#31/#32；#19 和 `LatestTrailQuery`（#8 的派生字段在此补全）；媒体清理任务；A 前端全面去 mock 联调；ApiFox 全量；结题报告 | A、H、E，全员 | M3 |
 | （后续）M5 测试补齐 | 越权用例、Testcontainers、源码扫描 | 待定 | M4 |
@@ -401,17 +405,17 @@ A 的前端工作贯穿始终：M1 联调登录，M2 联调编辑端，M3 联调
 
 ```mermaid
 graph LR
-  M0B[B 工程/Flyway/Security骨架/MP插件] --> M1Auth[B #1-#5 认证]
+  M0B[B 工程/web.xml/Flyway/拦截器骨架/MP插件] --> M1Auth[B #1-#5 认证]
   M0H[H common + 两个注解] --> M1Auth
   M0Def[各表所有者 迁移 V1-V11] --> M1Auth
-  M0B --> Gate[B 权限切面/scope/归属拦截器 + #36/#37]
+  M0B --> Gate[B 权限切面/scope/归属拦截器]
   M0H --> Oplog[H 操作日志切面 + #44]
   M0Def --> Tax[F #20-#27 #38 #39 分类标签]
   M0H --> AW[H AuditWriter]
   Gate --> Art[C #6-#10 #42 文章]
   Tax --> Art
   AW --> Art
-  Gate --> User[G #33-#35 用户管理]
+  Gate --> User[G #33-#37 用户管理/角色权限只读]
   M0Def --> Media[E #28/#29/#43 媒体]
   Gate --> Media
   Media --> CV[G ContentValidator]
@@ -442,8 +446,10 @@ graph LR
 | R3 | ~~B 的第 3 张表只是权限接触~~ | — | **已解决**：B 现在拥有 RBAC 三表、`user`、`login_throttle`，并读 `article` |
 | R14 | （v2.6）权限闸改成 Controller 上的 AOP 切面后，Spring MVC 在进入 Controller 代理前就完成参数绑定和 `@Valid`，请求体格式错误的 400 会先于权限 / 归属 404 | 和 api-spec §2.3 原定顺序不同（不泄露资源存在性） | 暂定接受新顺序，越权用例用合法请求体（api-spec §16-#17）；A、B 在 M1 前确认 |
 | R15 | （v2.6）逻辑删除后，指向 `category`/`article` 的外键 RESTRICT 不再拦截「删除被引用的行」 | 引用保护、「曾提交过不能删」可能漏判 | F、C 在 Service 里显式 `EXISTS` 检查并加锁（schema §4.3、§9）；H 审 |
-| R16 | （v2.6）`@TableLogic(delval = "id")` 是否被所用 MP 版本支持未验证 | 删除后唯一键可能撞名 | B 在 M0 验证；不行就改用 `setSql("deleted = id")`（schema §1） |
-| R17 | （v2.6）B 的工作量全组最深（RBAC + 切面 + 认证 + 骨架） | M1 延后 | 自动填充与 MP 插件可在 M0 先合；H 先合两个注解定义，各人不必等切面实现 |
+| R16 | （v2.6）`@TableLogic(delval = "id")` 是否被所用 MP 版本支持未验证（**低**：读 MP 源码，字段为 `Long` 时原样拼接） | 删除后唯一键可能撞名 | 实体 `deleted` 声明为 `Long`；B 仍在 M0 实测；不行就改用 `setSql("deleted = id")`（schema §1） |
+| R17 | （v2.6）B 的工作量全组最深（RBAC + 切面 + 认证 + 骨架）；去掉 Boot 后骨架要手工装配 | M1 延后 | 已把 #36/#37 移给 G、Jackson / 校验 / 404 移给 H（决策 T8）；自动填充与 MP 插件可在 M0 先合；H 先合两个注解定义，各人不必等切面实现 |
+| R18 | （v2.6 修订）切面、`@Transactional`、`@Async` 因配置遗漏而静默失效（没有 Boot 自动配置） | 权限闸、操作日志、事务看起来正常其实没生效 | 只用一个 Spring 容器（arch §2.10）；`PermissionCoverageChecker` 启动时断言 Controller 已被代理；M0 手工验证一次「编辑调管理员接口 → 404」与「事务回滚」 |
+| R19 | （v2.6 修订）自研的会话、CSRF 拦截器写错不会报错 | 越权或 CSRF 绕过 | 按 arch §5.1 实现；B 的 PR 由 A 重点审，手工验证记录覆盖：无会话 401、令牌缺失 / 错误 403、登录后旧令牌失效、停用账号下一次请求 401、超过 12 小时 401 |
 | R7 | 不少规则从 CHECK 挪到了 Java（AUD-01～08、USER-01、TAX-01、MEDIA-01～03、ART-01，schema §6） | 漏写一条，数据库不会报错 | 每条规则在 PR 描述里写明在哪个方法校验；H 审所有写留痕的 PR |
 | R4 | C 是枢纽（端口实现、`ArticleFilter`、读服务），同时还要审 A、E、F 的 PR | C 一卡，M2～M4 全部延后 | C 在 M1 末先合入端口实现和读服务的接口骨架 |
 | R5 | A 同时负责全部前端和一块后端，还要审所有 PR | A 成为瓶颈 | A 的后端放在 M4，工作量轻；同伴审核人先审一轮，A 做最终审核 |
