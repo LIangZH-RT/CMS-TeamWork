@@ -1,9 +1,10 @@
-# 数据库表规格（折中版 v1）
+# 数据库表规格（v2：16 张表，对应 SRS v2.6）
 
-> 依据：`CMS-SRS.md` v2.5（主文档）、`doc/context/architecture.md` §4～§7、`doc/api/api-spec.md` 草案 v0.1。
-> 本文是 12 张表的**字段级定义**，也是各表所有者写 Flyway 迁移的唯一依据。与 SRS 冲突时以 SRS 为准；与 api-spec 冲突时，接口字段以 api-spec 为准、存储以本文为准。
+> 依据：`CMS-SRS.md` v2.6（主文档）、`doc/context/architecture.md` §4～§7、`doc/api/api-spec.md` 草案 v0.1。
+> 本文是 16 张表的**字段级定义**，也是各表所有者写 Flyway 迁移的唯一依据。与 SRS 冲突时以 SRS 为准；与 api-spec 冲突时，接口字段以 api-spec 为准、存储以本文为准。
 > 参考 DDL：`doc/db/schema-reference.sql`。它**只是参考脚本，不是迁移**；后端脚手架建好后，由各表所有者按 §8 的版本号拆进 `src/main/resources/db/migration/`。
 > 2026-11-23 起生效。改本文 = 改表结构，只能走 docs PR，由 A 批准；已合并的迁移不改，只追加。
+> **v1 → v2（2026-11-23，SRS v2.6 按课程评分表补齐）**：12 → 16 张表。新增 `role`、`permission`、`role_permission`（B）与 `sys_operation_log`（H）；`user` 的 `role` 枚举列改为 `role_id` 外键并加 `status`、`updated_at`；`category` 加 `parent_id`、`sort_order`、`status`、`deleted`；`tag`、`article` 加 `deleted`；`media_file` 加回 `original_name`。后端还没有任何迁移被合并，所以迁移号整体重排（§8）。v1 的折中原则（§0）不变。
 
 ---
 
@@ -11,8 +12,8 @@
 
 | 项 | 改前（architecture §4.1 原表格） | 现在 |
 |---|---|---|
-| 表数 | 7 张，没有字段级定义 | **12 张**，全部有字段级定义 |
-| 范式 | 未审查 | 12 张表全部满足 **BCNF**；有多值事实的地方满足 **4NF**。另有 4 处**有意保留的受控冗余**（§5），逐条写明理由 |
+| 表数 | 7 张，没有字段级定义 | **16 张**，全部有字段级定义（v1 为 12 张） |
+| 范式 | 未审查 | 16 张表全部满足 **BCNF**；有多值事实的地方满足 **4NF**。另有 4 处**有意保留的受控冗余**（§5），逐条写明理由 |
 | 枚举存储 | 中文字面量，后端做中英映射 | **英文代码**，与 api-spec §4.1 完全一致，不再有映射层 |
 | 约束分工 | — | 数据库只放**结构性、简单**的约束；跨行、条件复杂的规则放 Service，并给出规则编号（§6） |
 
@@ -30,6 +31,11 @@
 | 6 | **不存** `article.submitted_at` | 它就是本轮「提交审核」留痕的 `created_at`。接口照常返回，由查询派生（§7） |
 | 7 | `article.version` 乐观锁 | MyBatis-Plus `@Version`；编辑接口带 `expected_version`，不一致返回 `409 40907`（api-spec §16-#11） |
 | 8 | api-spec §16-#2/#3/#7 按默认值收口 | 见 §11 |
+| 9 | **v2** RBAC 三表：`role`、`permission`、`role_permission`（B） | 评分表要求"用户 / 角色 / 权限"关联与细粒度权限；`user.role_id` 单值外键在结构上保证一人一角色（SRS BR-ROLE-001，决策 D1），不建 `user_role` |
+| 10 | **v2** `sys_operation_log`（H） | 评分表"操作日志"；与 `audit_log` 分两张表（决策 D8）：留痕是文章流程的业务事实、与业务同事务，操作日志是运维审计、独立事务（SRS §6.7） |
+| 11 | **v2** `category` 两级树、排序、启停 | SRS BR-TAX-006~008；`parent_id` 自引用外键，深度 ≤ 2 由 F 的 Service 校验 |
+| 12 | **v2** `article`、`category`、`tag` 逻辑删除（`deleted` 列） | SRS BR-DEL-002、BR-DEL-006；删除标记写本行 `id`，(`name`,`deleted`) 唯一键允许删除后重建同名（§1） |
+| 13 | **v2** `media_file.original_name` | 下载接口 #43 的 `Content-Disposition` 文件名（SRS FR-MEDIA-005，实验二上传下载的延续）；不能由其他列推出，不破坏 BCNF |
 
 ### 0.2 简化的部分
 
@@ -39,14 +45,14 @@
 | 2 | `audit_log` 两个关联列用"复合自引用外键 + 生成列"保证同文章、同类型 | 只保留**普通自引用外键 + 唯一键**（简单，且能挡住"一轮两个结论""一次通过两次到期发布"）；"同文章、正确类型"由 `AuditWriter` 校验 |
 | 3 | `media_purge_job` 带入队原因、状态等 | 只记**删文件失败**的文件：路径、失败次数、最近错误、下次重试时间；`@Scheduled` 重试，成功即删行 |
 | 4 | `media_file.media_kind` 生成列 + 复合外键挡"封面传 MP3" | 去掉生成列；用途与格式大类的匹配由 E 的上传 Service 校验（`400 40006`） |
-| 5 | `user` 用函数唯一索引保证"最多一个管理员" | 去掉函数索引；由 V1 种子、注册只建 `EDITOR`、本期没有改角色接口三点保证 |
+| 5 | `user` 用函数唯一索引保证"最多一个管理员" | v2 起不再要求"唯一管理员"（SRS BR-ROLE-004 改为"至少一个启用管理员"），由 G 的用户管理 Service 校验（USER-02，§6.3），不用函数索引 |
 
 ### 0.3 没有采纳的改动
 
 | # | 草案做法 | 结论与理由 |
 |---|---|---|
 | 1 | 删掉 `audit_log.actor_type`（它可由 `action` 推出） | **保留**。BR-AUDIT-004 和 architecture §4.1、§9.1 已按"类型 + ID"两列定稿，接口也输出 `operator.type`。作为受控冗余保留，并用一条 CHECK 锁死它和 `actor_id`、`action` 的一致性（§5.1） |
-| 2 | 封面和音频改为 `media_file.linked_at` + 函数唯一索引，去掉 `article.cover_media_id` / `audio_media_id` | **保留两个外键列**。函数索引在 MyBatis-Plus 里不好映射；跨文章、用途检查放在 Service 的 `@Transactional` 里做，正好练 Spring 事务。代价是 `article` 与 `media_file` 互相引用，外键放在单独的 V9 迁移里补（§5.4） |
+| 2 | 封面和音频改为 `media_file.linked_at` + 函数唯一索引，去掉 `article.cover_media_id` / `audio_media_id` | **保留两个外键列**。函数索引在 MyBatis-Plus 里不好映射；跨文章、用途检查放在 Service 的 `@Transactional` 里做，正好练 Spring 事务。代价是 `article` 与 `media_file` 互相引用，外键放在单独的 V11 迁移里补（§5.4；v1 为 V9） |
 | 3 | 生成列、函数索引 | 全部不用，MyBatis-Plus 实体与表列一一对应，没有不可写列 |
 
 ---
@@ -56,10 +62,16 @@
 - 引擎 InnoDB，字符集 `utf8mb4`，默认排序规则 `utf8mb4_0900_ai_ci`；代码类列（状态、动作、格式、登录名等）用 `ascii` / `ascii_bin`，写入中文或大小写不符会直接报错。
 - 主键 `BIGINT AUTO_INCREMENT`，对应 Java `Long`；两张字典表用自然键（`code`）。
 - **时间一律 `DATETIME(3)`，存 UTC。** 接口层按 SRS §5.5、api-spec §1.3 输出 `+08:00`。不用 `TIMESTAMP`，避开 2038 年问题和会话时区的隐式换算。时间值由应用传入（同一批次共用一个 `now`，architecture §6.1），列上不设默认值。
+- **自动填充（v2）**：`created_at` / `updated_at` 由 MyBatis-Plus `MetaObjectHandler` 统一填充（insert 填两者，update 填 `updated_at`），业务代码不手写（SRS §7.2）。文章状态迁移用 `LambdaUpdateWrapper` 且不传实体，MP 不触发填充，所以审核、发布不改 `article.updated_at`（它的语义是"内容最后修改时间"）。不加 `created_by` / `updated_by`：没有规则使用它，"谁做的"由 `sys_operation_log` 回答。
+- **逻辑删除（v2）**：`article`、`category`、`tag` 有 `deleted BIGINT NOT NULL DEFAULT 0`。未删除为 `0`，删除时写入本行 `id`，这样 (`name`,`deleted`) 唯一键允许删除后重建同名（BR-DEL-007）。MP 写法 `@TableLogic(value = "0", delval = "id")`。
+  - **M0 验证项（B）**：在真库上确认所用 MyBatis-Plus 版本把 `delval = "id"` 原样拼成 `SET deleted = id`。如果它被当成字符串字面量 `'id'` 或报错，就改为各 Service 用 `LambdaUpdateWrapper.setSql("deleted = id")` 写自定义删除方法，查询过滤仍由 `@TableLogic` 自动完成。等价 SQL 已在附录 A 验证可执行。
+  - MySQL 不允许 CHECK 引用 `AUTO_INCREMENT` 列，所以"`deleted` 只能是 0 或本行 id"不在库里约束，由删除方法保证；库里只放 `deleted >= 0`。
+  - 手写 SQL（Mapper XML、窗口函数）必须显式带 `deleted = 0`，MP 的自动条件不覆盖 XML（SRS X-DEL-01）。
+  - `user` 不删除（BR-USER-002）；留痕、操作日志只增不删；关联表、媒体索引、`login_throttle` 仍按原规则物理删除（BR-DEL-006）。
 - **外键一律默认 `RESTRICT`**，不级联（architecture §4.1、§8）。
 - **不用生成列、不用函数索引、不用 ENUM 类型。** 值固定、没有附属属性的枚举用 `VARCHAR + CHECK`；有附属属性（中文名、MIME 等）的建字典表。
 - 需要 MySQL ≥ 8.0.16（CHECK 约束生效）。参考 DDL 已在 8.4.6 上验证（附录 A）。
-- 字典表（`media_format`、`reject_category`、`review_standard`）**运行时只读**，改动只走迁移；`audit_log` 应用账号只有 `SELECT`/`INSERT`（INV-04）。
+- 字典表（`media_format`、`reject_category`、`review_standard`）与 RBAC 三表（`role`、`permission`、`role_permission`）**运行时只读**，改动只走迁移；`audit_log`、`sys_operation_log` 应用账号只有 `SELECT`/`INSERT`（INV-04）；逻辑删除的表和 `user` 不授 `DELETE`（§8）。
 
 **MyBatis-Plus 映射提示**
 
@@ -69,6 +81,9 @@
 | `article.version` | `@Version`，注册 `OptimisticLockerInnerInterceptor` |
 | `media_file.media_usage` | 列名避开保留字 `usage`；实体字段可叫 `usage`，用 `@TableField("media_usage")` |
 | `user` 表名 | 是保留字，`@TableName("`user`")` |
+| `deleted` | `@TableLogic(value = "0", delval = "id")`（M0 验证，见上） |
+| `created_at` / `updated_at` | `@TableField(fill = FieldFill.INSERT)` / `INSERT_UPDATE`，`MetaObjectHandler` 填 UTC `now` |
+| 角色、账号状态、分类状态、日志模块 | Java 枚举 + `@EnumValue`（H 定义） |
 | 时间 | `LocalDateTime` 存 UTC；输出 `+08:00` 统一在 H 的 Jackson 配置里做 |
 
 ---
@@ -92,40 +107,69 @@
 
 | # | 表 | 所有者 | 类别 | 主要内容 |
 |---|---|---|---|---|
-| 1 | `user` | B | 实体 | 账号、BCrypt、单一角色 |
-| 2 | `login_throttle` | B | 实体 | 按登录名的失败计数与锁定 |
-| 3 | `category` | F | 实体 | 分类（封闭集合） |
-| 4 | `tag` | F | 实体 | 标签（开放集合、扁平） |
-| 5 | `article` | C | 实体 | 文章本体；`status` 与时间字段只经 G 的状态机写 |
-| 6 | `article_tag` | F | 关联 | 文章-标签 N:M |
-| 7 | `media_format` | E | 字典 | 8 种真实格式 → 大类、MIME、扩展名 |
-| 8 | `media_file` | E | 实体 | 媒体索引与引用标记 |
-| 9 | `media_purge_job` | E | 实体 | 删文件失败的重试记录 |
-| 10 | `reject_category` | D | 字典 | 8 个驳回类别 |
-| 11 | `review_standard` | D | 字典 | 审核标准版本登记 |
-| 12 | `audit_log` | H | 事件 | 7 类流程留痕，只增不改不删 |
+| 1 | `role` | B | 字典 | 2 个角色（EDITOR / ADMIN），运行时只读 |
+| 2 | `permission` | B | 字典 | 27 个权限点 `资源:动作`，运行时只读 |
+| 3 | `role_permission` | B | 关联 | 角色-权限 N:M（EDITOR 14 个、ADMIN 20 个） |
+| 4 | `user` | B（`status`、`role_id` 由 G 经 B 的 Service 写） | 实体 | 账号、BCrypt、唯一角色（外键）、启停状态 |
+| 5 | `login_throttle` | B | 实体 | 按登录名的失败计数与锁定 |
+| 6 | `category` | F | 实体 | 分类（封闭的两级树，排序、启停、逻辑删除） |
+| 7 | `tag` | F | 实体 | 标签（开放集合、扁平、逻辑删除） |
+| 8 | `article` | C | 实体 | 文章本体（逻辑删除）；`status` 与时间字段只经 G 的状态机写 |
+| 9 | `article_tag` | F | 关联 | 文章-标签 N:M |
+| 10 | `media_format` | E | 字典 | 8 种真实格式 → 大类、MIME、扩展名 |
+| 11 | `media_file` | E | 实体 | 媒体索引与引用标记、原始文件名 |
+| 12 | `media_purge_job` | E | 实体 | 删文件失败的重试记录 |
+| 13 | `reject_category` | D | 字典 | 8 个驳回类别 |
+| 14 | `review_standard` | D | 字典 | 审核标准版本登记 |
+| 15 | `audit_log` | H | 事件 | 7 类流程留痕，只增不改不删 |
+| 16 | `sys_operation_log` | H | 事件 | 系统操作日志（全部后台写操作与登录登出），只增不改不删 |
+
+评分表"用户 / 角色 / 权限 / 文章 / 分类 / 日志六表关联"对应：`user` → `role` →（`role_permission`）→ `permission`；`article` → `category`（自引用两级）；`sys_operation_log` / `audit_log` → `user`、`article`。
 
 ```mermaid
 erDiagram
+    role ||--o{ user : "role_id（一人一角色）"
+    role ||--o{ role_permission : "role_id"
+    permission ||--o{ role_permission : "permission_id"
+    user |o--o{ sys_operation_log : "operator_id（匿名为空）"
+    category |o--o{ category : "parent_id（≤ 2 级）"
     user ||--o{ article : "author_id"
     user ||--o{ audit_log : "actor_id（SYSTEM 时为空）"
     category ||--o{ article : "category_id"
     article ||--o{ article_tag : "article_id"
     tag ||--o{ article_tag : "tag_id"
     article ||--o{ media_file : "article_id（唯一归属）"
-    media_file |o--o| article : "cover_media_id / audio_media_id（V9）"
+    media_file |o--o| article : "cover_media_id / audio_media_id（V11）"
     media_format ||--o{ media_file : "format_code"
     article ||--o{ audit_log : "article_id"
     reject_category ||--o{ audit_log : "reject_category_code（仅驳回）"
     review_standard ||--o{ audit_log : "review_standard_id（通过/驳回/下架）"
     audit_log |o--o| audit_log : "related_submission_id / related_approval_id（唯一）"
 
+    role {
+        smallint id PK
+        varchar code UK
+        varchar name UK
+        datetime created_at
+    }
+    permission {
+        smallint id PK
+        varchar code UK
+        varchar name
+        varchar module
+    }
+    role_permission {
+        smallint role_id PK,FK
+        smallint permission_id PK,FK
+    }
     user {
         bigint id PK
         varchar username UK
         char password_hash
-        varchar role
+        smallint role_id FK
+        varchar status
         datetime created_at
+        datetime updated_at
     }
     login_throttle {
         varchar username PK "无外键"
@@ -134,13 +178,18 @@ erDiagram
     }
     category {
         bigint id PK
-        varchar name UK
+        bigint parent_id FK
+        varchar name UK "UK(name, deleted)"
+        int sort_order
+        varchar status
+        bigint deleted UK
         datetime created_at
         datetime updated_at
     }
     tag {
         bigint id PK
-        varchar name UK
+        varchar name UK "UK(name, deleted)"
+        bigint deleted UK
         datetime created_at
         datetime updated_at
     }
@@ -156,6 +205,7 @@ erDiagram
         datetime scheduled_publish_time
         varchar status
         datetime published_at
+        bigint deleted
         datetime created_at
         datetime updated_at
         int version
@@ -176,6 +226,7 @@ erDiagram
         varchar media_usage
         varchar format_code FK
         char storage_key UK
+        varchar original_name
         int size_bytes
         datetime linked_at
         datetime created_at
@@ -215,6 +266,21 @@ erDiagram
         bigint related_approval_id FK
         bigint related_submission_id FK
     }
+    sys_operation_log {
+        bigint id PK
+        bigint operator_id FK
+        varchar module
+        varchar operation
+        varchar target_type
+        bigint target_id
+        varchar http_method
+        varchar request_uri
+        varchar client_ip
+        boolean success
+        int error_code
+        int duration_ms
+        datetime created_at
+    }
 ```
 
 `media_purge_job` 故意不连任何表：它记录的文件对应的 `media_file` 行已经删除了。`login_throttle` 故意不连 `user`（§4.2）。
@@ -225,6 +291,34 @@ erDiagram
 
 > 「依据」列引用 SRS（不带前缀）、arch（architecture.md）、api（api-spec.md）。
 
+### 4.0 `role` / `permission` / `role_permission`（B，v2 新增，运行时只读）
+
+**`role`**
+
+| 列 | 类型 | 空 | 键 / 约束 | 说明 | 依据 |
+|---|---|---|---|---|---|
+| `id` | SMALLINT UNSIGNED | 否 | PK，自增 | | |
+| `code` | VARCHAR(16) ascii_bin | 否 | UK；CHECK IN (`EDITOR`,`ADMIN`) | 接口仍输出代码 | BR-RBAC-001 |
+| `name` | VARCHAR(20) | 否 | UK | 中文名（内容编辑、管理员） | |
+| `created_at` | DATETIME(3) | 否 | | | |
+
+**`permission`**
+
+| 列 | 类型 | 空 | 键 / 约束 | 说明 | 依据 |
+|---|---|---|---|---|---|
+| `id` | SMALLINT UNSIGNED | 否 | PK，自增 | | |
+| `code` | VARCHAR(40) ascii_bin | 否 | UK；CHECK `^[a-z-]+(:[a-z-]+)+$` | 如 `review:approve`、`article:read:all` | BR-RBAC-002 |
+| `name` | VARCHAR(40) | 否 | | 中文说明 | |
+| `module` | VARCHAR(16) ascii_bin | 否 | 索引 | 分组展示（ARTICLE / REVIEW / AUDIT / TAX / MEDIA / USER / OPLOG） | api #37 |
+
+**`role_permission`**：`role_id` FK → `role`，`permission_id` FK → `permission`，PK(`role_id`,`permission_id`)，索引 (`permission_id`)。
+
+- 函数依赖：`role`：`id → *`、`code → *`、`name → *`；`permission`：`id → *`、`code → *`。`role_permission` 是全键表。**BCNF / 4NF**。
+- 种子（V1）：2 个角色、27 个权限点、34 行角色-权限（EDITOR 14、ADMIN 20），与 SRS §4.5 权限矩阵、§4.7 权限点清单逐项对应。
+- 本期**不提供运行时修改角色权限的接口**（SRS BR-RBAC-002，决策 D5），应用账号对三张表只有 SELECT；改权限 = 新增迁移。
+- 权限集查询（每请求一次，BR-RBAC-005）：`SELECT p.code FROM user u JOIN role_permission rp ON rp.role_id = u.role_id JOIN permission p ON p.id = rp.permission_id WHERE u.id = ?`，一条 SQL，不逐个查权限点（N+1 落点）。
+- `module` 不建字典表：值域小且固定，没有附属属性。
+
 ### 4.1 `user`（B）
 
 | 列 | 类型 | 空 | 默认 | 键 / 约束 | 说明 | 依据 |
@@ -232,12 +326,16 @@ erDiagram
 | `id` | BIGINT | 否 | 自增 | PK | 账号 ID | api §4.2 |
 | `username` | VARCHAR(32) ascii_bin | 否 | — | UK；CHECK `^[a-z0-9_]{3,32}$` | **只存规范形式**：去首尾空白后转小写 | §4.1.1、api §16-#7 |
 | `password_hash` | CHAR(60) ascii_bin | 否 | — | — | BCrypt | §4.1.2、arch §5.1 |
-| `role` | VARCHAR(10) ascii_bin | 否 | — | CHECK IN (`EDITOR`,`ADMIN`) | 单一角色，单列 | BR-ROLE-001 |
-| `created_at` | DATETIME(3) | 否 | — | — | 注册或初始化时间 | api §4.2 |
+| `role_id` | SMALLINT UNSIGNED | 否 | — | FK → `role`；索引 | 唯一角色。**单值非空外键 = 结构上一人一角色**（决策 D1） | BR-ROLE-001 |
+| `status` | VARCHAR(8) ascii_bin | 否 | `ENABLED` | CHECK IN (`ENABLED`,`DISABLED`) | 停用账号登录统一 401，已有会话下一次请求 401 | BR-USER-001 |
+| `created_at` | DATETIME(3) | 否 | — | — | 注册或初始化时间（自动填充） | api §4.2 |
+| `updated_at` | DATETIME(3) | 否 | — | — | 最后修改时间（启停、改角色；自动填充） | §7.2 |
 
 - 函数依赖：`id → *`；`username → *`。候选键 `{id}`、`{username}`。**BCNF**。
-- 种子：V1 插入唯一管理员（BCrypt 字面量，arch §2.5）。
-- "每库恰好一个管理员"（§1.4）：种子保证有一个；注册接口只建 `EDITOR`、本期没有改角色接口，保证不会多（规则 USER-01，§6.3）。
+- 种子：V2 插入初始管理员（BCrypt 字面量，arch §2.5），`role_id` 取 `ADMIN`。
+- v2 起管理员可以多于一个（SRS BR-ROLE-004/005，决策 D3）："至少一个启用管理员""不能停用或降级自己""有文章（含已逻辑删除的）的编辑不能升为管理员"由 G 的用户管理 Service 校验（USER-02/03，§6.3）。
+- 账号不删除（BR-USER-002），没有 `deleted` 列，应用账号不授 DELETE。
+- 写入分工：B 拥有本表（注册、登录相关写入）；G 的用户管理 #34/#35 改 `status`、`role_id` 时调用 B 的 `UserService`，不自建 Mapper 写入。
 - 不加 `email`：本期不采集（§4.1.1），arch §9.1 留的问题在此结案。
 
 ### 4.2 `login_throttle`（B）
@@ -254,40 +352,55 @@ erDiagram
 
 ### 4.3 `category` / `tag`（F）
 
-两张表结构相同：
+两张表共有的列（v2 起都有 `deleted`；`category` 另有 4 列，见下表之后）：
 
 | 列 | 类型 | 空 | 默认 | 键 / 约束 | 说明 | 依据 |
 |---|---|---|---|---|---|---|
 | `id` | BIGINT | 否 | 自增 | PK | | api §4.5 |
 | `name` | VARCHAR(50) utf8mb4_0900_as_ci | 否 | — | UK；CHECK 长度 1..50 且 `name = TRIM(name)` | 去首尾空白后存；同类内**不区分大小写**唯一 | BR-TAX-003/004、api §16-#2 |
 | `created_at` | DATETIME(3) | 否 | — | | | api §4.5 |
-| `updated_at` | DATETIME(3) | 否 | — | | 改名时更新 | api §4.5 |
+| `deleted` | BIGINT | 否 | 0 | UK(`name`,`deleted`)；CHECK `>= 0` | 逻辑删除标记：0 或本行 `id` | BR-DEL-002/007、BR-TAX-009 |
+| `updated_at` | DATETIME(3) | 否 | — | | 改名、改父级、启停、排序时更新（自动填充） | api §4.5 |
 
-- 函数依赖：`id → *`；`name → *`。**BCNF**。
+`category` 另有（v2）：
+
+| 列 | 类型 | 空 | 默认 | 键 / 约束 | 说明 | 依据 |
+|---|---|---|---|---|---|---|
+| `parent_id` | BIGINT | 是 | NULL | FK → `category(id)`；索引 (`parent_id`,`sort_order`,`id`) | NULL = 一级分类；只能挂在一级分类下 | BR-TAX-006 |
+| `sort_order` | INT | 否 | 0 | 同上索引 | 同级升序，相同按 `id` | BR-TAX-007 |
+| `status` | VARCHAR(8) ascii_bin | 否 | `ENABLED` | CHECK IN (`ENABLED`,`DISABLED`) | 停用后不能被新选用、导航隐藏；已发布文章照常公开（决策 D7） | BR-TAX-008 |
+
+- 函数依赖：`id → *`；(`name`,`deleted`) → *。**BCNF**。"父分类停用则子分类视为停用"是运行时推出的，不存。
+- 深度 ≤ 2、不成环、`parent_id <> id` 由 F 的 Service 校验（TAX-02，§6.3）：数据库表达不了深度，MySQL 也不允许 CHECK 引用自增列。
+- 名称唯一是**全局**的（不分父级），与 v1 一致。
 - 不存 `in_use`（由 `EXISTS` 推出，§7）、不存 `created_by`（BR-TAX-005 不限制创建人，没有规则用到它）。
 - 排序规则 `utf8mb4_0900_as_ci`：大小写不敏感、重音敏感。注意它会把全角、半角字母视为相同（`Ａ` = `a`），本项目接受这一点。
 - 重名插入撞唯一键 → Service 映射为 `409 40906`。
+- 引用保护（BR-TAX-004/009）只统计**未删除**文章：逻辑删除后外键不再能代替 `EXISTS` 检查（被逻辑删除的分类行还在，外键 RESTRICT 不会触发），所以删除、改名、改父级都走 F 的 Service 检查（TAX-01）。有未删除子分类时拒绝删除 `409 40908`。
 
 ### 4.4 `article`（C；`status`、`scheduled_publish_time`、`published_at` 只经 G 的状态机写）
 
 | 列 | 类型 | 空 | 默认 | 键 / 约束 | 说明 | 依据 |
 |---|---|---|---|---|---|---|
 | `id` | BIGINT | 否 | 自增 | PK | | |
-| `author_id` | BIGINT | 否 | — | FK → `user`；索引首列 `(author_id, status, updated_at)` | 归属编辑，创建后不可改 | BR-ISO-001、INV-08 |
+| `author_id` | BIGINT | 否 | — | FK → `user`；索引首列 `(author_id, deleted, status, updated_at)` | 归属编辑，创建后不可改 | BR-ISO-001、INV-08 |
 | `category_id` | BIGINT | 否 | — | FK → `category` | 单选必填 | BR-TAX-001、§7.2 |
 | `title` | VARCHAR(200) | 否 | — | CHECK 非全空白 | ≤ 200 字符 | §7.2、api §16-#3 |
 | `excerpt` | VARCHAR(500) | 否 | `''` | — | 未填为空串，不自动截取；≤ 500 | §7.2、api §16-#3 |
 | `content` | MEDIUMTEXT | 否 | — | CHECK `OCTET_LENGTH ≤ 1048576` | Markdown 原文，≤ 1 MiB（UTF-8 字节） | §7.2、INV-06、api §16-#3 |
-| `cover_media_id` | BIGINT | 是 | NULL | FK → `media_file`（V9） | 当前封面；**受控冗余**（§5.4） | api §4.10、§6.0.1 |
-| `audio_media_id` | BIGINT | 是 | NULL | FK → `media_file`（V9） | 当前音频；**受控冗余**（§5.4） | api §4.10、§6.0.1 |
+| `cover_media_id` | BIGINT | 是 | NULL | FK → `media_file`（V11） | 当前封面；**受控冗余**（§5.4） | api §4.10、§6.0.1 |
+| `audio_media_id` | BIGINT | 是 | NULL | FK → `media_file`（V11） | 当前音频；**受控冗余**（§5.4） | api §4.10、§6.0.1 |
 | `scheduled_publish_time` | DATETIME(3) | 是 | NULL | 索引 `(status, scheduled_publish_time)` | 预定发布时间；撤回时清空 | §5.5、BR-PUB-009 |
 | `status` | VARCHAR(16) ascii_bin | 否 | `DRAFT` | CHECK 6 个英文代码 | 只经状态机改；**受控冗余**（§5.2） | §5.1、INV-01 |
 | `published_at` | DATETIME(3) | 是 | NULL | CHECK 已发布 / 已下架时非空；索引 `(status, published_at)` | 本次实际发布时间，下架期间保留；**受控冗余**（§5.3） | §5.5、INV-07 |
-| `created_at` | DATETIME(3) | 否 | — | | | §7.2 |
-| `updated_at` | DATETIME(3) | 否 | — | | 最后修改时间 | §7.2 |
+| `deleted` | BIGINT | 否 | 0 | CHECK `deleted = 0 OR status = 'DRAFT'` | 逻辑删除标记：0 或本行 `id`；只有从未提交的草稿能删 | BR-DEL-001/002 |
+| `created_at` | DATETIME(3) | 否 | — | | 自动填充 | §7.2 |
+| `updated_at` | DATETIME(3) | 否 | — | | 内容最后修改时间（自动填充；状态迁移不改） | §7.2 |
 | `version` | INT UNSIGNED | 否 | 0 | — | 乐观锁，MyBatis-Plus `@Version` | §5.6、api §16-#11 |
 
-- 另有 CHECK：`status = 'SCHEDULED'` 时 `scheduled_publish_time` 必须非空。
+- 另有 CHECK：`status = 'SCHEDULED'` 时 `scheduled_publish_time` 必须非空；`ck_article_deleted`：删除标记只能落在 `DRAFT` 行上。
+- 不加 `deleted_at`：删除时间可从 `sys_operation_log` 查到。
+- 被逻辑删除的文章从未进入流程，没有留痕，也一定是 `DRAFT`，所以按 `status` 过滤的公开、审核、发布查询天然不会命中已删除行；`(status, …)` 两个索引不需要加 `deleted`。后台列表仍必须带 `deleted = 0`（`@TableLogic` 自动追加）。
 - 函数依赖：`id → *`。`author_id`、`category_id` 不决定其他列；`status` 与 `published_at` 之间是约束不是函数依赖。**BCNF**。
 - 两组独立的多值事实（标签、媒体）分别在 `article_tag`、`media_file`，**4NF**。
 - **不存的列**：`submitted_at`（§7 派生）、`current_submission_id`、任何"最近驳回 / 下架"列（SRS §7.2(3) 明文禁止冗余存回）。
@@ -301,7 +414,7 @@ erDiagram
 | `tag_id` | BIGINT | 否 | PK(2)；FK → `tag`；索引 `(tag_id, article_id)` 用于交集筛选 | BR-TAX-004、BR-SEARCH-005 |
 
 - 全键表，没有非主属性，**BCNF / 4NF / 5NF**。
-- 被引用的标签删不掉由外键 RESTRICT 保证（BR-TAX-004）；"被引用不能改名"由 F 的 Service 在 `SELECT … FOR UPDATE` 锁住标签行后做 `EXISTS` 检查（规则 TAX-01）。分类同理（`article.category_id`）。
+- v2：标签、分类改为逻辑删除后，外键 RESTRICT 不再拦截"删除被引用的标签 / 分类"（行没有被物理删除）。"被引用不能改名、不能删除"统一由 F 的 Service 在 `SELECT … FOR UPDATE` 锁住标签 / 分类行后做 `EXISTS` 检查（规则 TAX-01）。文章逻辑删除时，同一事务物理删除它的 `article_tag` 行（BR-DEL-004），所以 `article_tag` 里不会残留已删除文章的引用。
 
 ### 4.6 `media_format`（E，字典，运行时只读）
 
@@ -313,7 +426,7 @@ erDiagram
 | `extension` | VARCHAR(8) ascii_bin | 否 | UK | 规范扩展名（JPEG 存 `jpg`） |
 
 - 函数依赖：`code → *`；`mime_type → *`；`extension → *`。三个候选键，**BCNF**。
-- 种子 8 行（V6）。上传声明的扩展名别名（`jpeg` 视为 JPEG）放在 E 的代码常量里。
+- 种子 8 行（V7）。上传声明的扩展名别名（`jpeg` 视为 JPEG）放在 E 的代码常量里。
 - 依据：BR-MEDIA-002/005，arch §4.2。
 
 ### 4.7 `media_file`（E）
@@ -325,13 +438,14 @@ erDiagram
 | `media_usage` | VARCHAR(12) ascii_bin | 否 | — | CHECK IN (COVER, INLINE_IMAGE, AUDIO) | 上传时确定；接口字段名 `usage` | api §4.1、FR-MEDIA-001 |
 | `format_code` | VARCHAR(8) ascii_bin | 否 | — | FK → `media_format` | 魔数判定的真实格式 | BR-MEDIA-002 |
 | `storage_key` | CHAR(36) ascii_bin | 否 | — | UK | 系统生成的 UUID | BR-MEDIA-002、arch §4.2 |
+| `original_name` | VARCHAR(255) | 否 | — | CHECK 非全空白 | **v2 加回**：上传时的原始文件名（去掉路径），只用于下载的 `Content-Disposition`（RFC 5987 编码），不参与存储路径 | FR-MEDIA-005 |
 | `size_bytes` | INT UNSIGNED | 否 | — | CHECK `> 0`，AUDIO ≤ 20 MiB，其余 ≤ 5 MiB | 字节数 | BR-MEDIA-002/005 |
 | `linked_at` | DATETIME(3) | 是 | NULL | 索引 `(linked_at, created_at)` | 首次保存进文章引用的时间；NULL = 未关联上传；**解除引用即删行** | BR-MEDIA-004、api §4.9 `linked` |
 | `created_at` | DATETIME(3) | 否 | — | | 上传时间（24 小时清理起点） | BR-MEDIA-004 |
 
 - 函数依赖：`id → *`；`storage_key → *`。**BCNF**。
-- **不存的列**：`mime`、扩展名（由 `format_code` 决定，见 `media_format`）；相对路径（= `{cover|inline|audio}/{storage_key}.{extension}`，运行时拼出）；上传人（只有归属编辑能上传，= `article.author_id`）；`original_name`（api §4.9 不返回，SRS 不要求）；`linked` 布尔列（= `linked_at IS NOT NULL`）。
-- 引用一旦解除（封面被替换、正文不再引用某图、文章删除），**同一事务里删掉这一行**，事务提交后再删文件。所以"已失去全部引用但文件还没删"的媒体在出口第 1 步就查不到，直接 404（arch §5.4 第 3 步自动满足）。
+- **不存的列**：`mime`、扩展名（由 `format_code` 决定，见 `media_format`）；相对路径（= `{cover|inline|audio}/{storage_key}.{extension}`，运行时拼出）；上传人（只有归属编辑能上传，= `article.author_id`）；`linked` 布尔列（= `linked_at IS NOT NULL`）。
+- 引用一旦解除（封面被替换、正文不再引用某图、文章逻辑删除），**同一事务里删掉这一行**，事务提交后再删文件。所以"已失去全部引用但文件还没删"的媒体在出口第 1 步就查不到，直接 404（arch §5.4 第 3 步自动满足）。
 - 用途与格式大类的匹配（封面不能是 MP3）由 E 的上传 Service 校验（规则 MEDIA-01）。
 
 ### 4.8 `media_purge_job`（E）
@@ -361,7 +475,7 @@ erDiagram
 | `sort_order` | TINYINT UNSIGNED | 否 | UK | 展示顺序 |
 
 - 函数依赖：`code → *`；`label → *`；`sort_order → *`。**BCNF**。
-- 种子 8 行（V7）：前 5 类（违法违规、真实性／来源、版权／隐私、未成年人／低俗／暴力、歧视／骚扰／引战）归 `COMPLIANCE`，"垃圾／营销""内容质量／博客定位"归 `QUALITY`，"其他"归 `OTHER`。
+- 种子 8 行（V8）：前 5 类（违法违规、真实性／来源、版权／隐私、未成年人／低俗／暴力、歧视／骚扰／引战）归 `COMPLIANCE`，"垃圾／营销""内容质量／博客定位"归 `QUALITY`，"其他"归 `OTHER`。
 - **分组是【建议】**：SRS 只要求"合规违规与内容质量必须用不同类别"（BR-CONTENT-005），没有规定分组。分组只用于审核页展示和统计，不影响任何判定。
 - 为什么建表而不是只写代码常量：中文名只存一处，#15 直接查表；应用账号只授 SELECT，"固定 8 类"在权限层落实。
 
@@ -407,6 +521,28 @@ erDiagram
 - 函数依赖：`id → *`；`related_submission_id`、`related_approval_id` 非空时也决定整行（候选键）。**BCNF / 4NF / 5NF**（§2）。
 - `reason` 一列同时承担驳回意见和下架原因，与 SRS §6.6 字段规则表、api §4.13 的 `reason` 一致，不拆两列。长度 ≤ 500（【建议】，SRS 未定，api §16-#3）。
 
+### 4.12 `sys_operation_log`（H，v2 新增，应用账号只有 SELECT / INSERT）
+
+| 列 | 类型 | 空 | 键 / 约束 | 说明 | 依据 |
+|---|---|---|---|---|---|
+| `id` | BIGINT | 否 | PK | | |
+| `operator_id` | BIGINT | 是 | FK → `user`；索引 (`operator_id`,`created_at`) | 匿名（登录失败、注册）为 NULL | BR-OPLOG-002 |
+| `module` | VARCHAR(16) ascii_bin | 否 | CHECK IN (AUTH, ARTICLE, REVIEW, TAX, MEDIA, USER)；索引 (`module`,`created_at`) | | BR-OPLOG-002 |
+| `operation` | VARCHAR(24) ascii_bin | 否 | CHECK `^[A-Z][A-Z_]*$` | 如 `ARTICLE_DELETE`、`LOGIN_FAILED`、`REVIEW_BATCH_APPROVE` | BR-OPLOG-002 |
+| `target_type` / `target_id` | VARCHAR(16) / BIGINT | 是 | CHECK 有 `target_id` 必有 `target_type` | 由注解 SpEL 取值；批量操作 `target_id` 为 NULL | BR-OPLOG-002 |
+| `http_method` | VARCHAR(6) ascii_bin | 否 | CHECK IN (POST, PUT, PATCH, DELETE) | 读操作不记 | BR-OPLOG-001 |
+| `request_uri` | VARCHAR(200) ascii_bin | 否 | | 不含查询串 | |
+| `client_ip` | VARCHAR(45) ascii_bin | 否 | | IPv6 最长 45 | |
+| `success` | BOOLEAN | 否 | 见 `ck_oplog_error` | 业务失败也记一条 | BR-OPLOG-004 |
+| `error_code` | INT | 是 | CHECK 成功时为空、失败时非空 | api §3.3 的业务码 | |
+| `duration_ms` | INT UNSIGNED | 否 | | | |
+| `created_at` | DATETIME(3) | 否 | 索引 (`created_at`,`id`) | | BR-OPLOG-005 |
+
+- 函数依赖 `id → *`。**不存操作人登录名**：它由 `operator_id` 决定，存了就是传递依赖。**BCNF**。
+- **不存请求体、密码，登录失败不存尝试的登录名**（BR-OPLOG-003）。
+- 写入方式：`@OperationLog` 切面（H）在 `finally` 里调用 `@Async` + `REQUIRES_NEW` 的 `OperationLogWriter`，写入失败只记应用日志，不影响业务结果（BR-OPLOG-004）。这和 `audit_log`"与业务同事务、失败则业务回滚"正好相反，所以两张表不合并（决策 D8）。
+- `module` 不建字典表：值域小且固定，用 CHECK。
+
 ---
 
 ## 5. 有意保留的受控冗余
@@ -420,7 +556,7 @@ erDiagram
 | 5.3 | `article.published_at` | 等于最近一条发布留痕（立即发布的 APPROVE 或 AUTO_PUBLISH）的 `published_at` | SRS §5.5 明文要求"系统维护两个字段"；公开列表按它排序，需要 `(status, published_at)` 索引；INV-07 直接作用在它上 | 同 5.2：同一出口（状态机）、同一事务写入 |
 | 5.4 | `article.cover_media_id` / `audio_media_id`（以及 `media_file.linked_at` 对这两类媒体的标记） | 媒体行本身带 `article_id` 和用途；"哪张是当前封面"也可以只用媒体行上的标记表达 | 接口按"文章的封面、音频"读写（api §4.10、§6.0.1），两个外键列最直观；"每篇最多一个封面 / 音频"由单列天然保证，不需要函数唯一索引；跨文章、用途检查放 Service 的 `@Transactional` 里，是 Spring 事务的练习点 | C 调 E 的 `MediaRefService`，在同一事务里同时改 `article` 的两列和 `media_file.linked_at`；被替换的旧媒体行在同一事务里删除（规则 MEDIA-02，§6.3、§9） |
 
-代价（5.4）：`article` 与 `media_file` 互相引用。`article` 先建（V4，只有列没有外键），`media_file` 在 V6 建，两个外键在 V9 补上。删除草稿时要先把两列置 NULL 再删媒体行（§9）。
+代价（5.4）：`article` 与 `media_file` 互相引用。`article` 先建（V5，只有列没有外键），`media_file` 在 V7 建，两个外键在 V11 补上。删除草稿（逻辑删除）时要先把两列置 NULL 再删媒体行（§9）。
 
 不保留的派生数据：`article.submitted_at`（= 本轮 SUBMIT 留痕的 `created_at`）、`current_submission_id`、最近驳回 / 下架、`in_use`、`media_file.linked`、`media_file` 的 MIME / 扩展名 / 路径 / 上传人。
 
@@ -431,10 +567,11 @@ erDiagram
 ### 6.1 数据库负责（结构性、简单）
 
 - 主键、唯一键、外键（RESTRICT）；
-- 取值域 CHECK（状态、角色、用途、动作、操作人类型、驳回分组）；
+- 取值域 CHECK（文章状态、角色代码、权限点格式、账号状态、分类状态、用途、动作、操作人类型、驳回分组、日志模块与方法）；
 - 单列或单行的简单 CHECK：登录名格式、名称去空白与长度、标题非全空白、正文 ≤ 1 MiB、媒体大小上限、已发布必有 `published_at`、待发布必有预定时间、登录失败计数 0..4；
 - `audit_log` 的 3 条关键条件 CHECK（§4.11）；
-- 表级权限：`audit_log` 只授 SELECT / INSERT，三张字典表只授 SELECT（INV-04）。
+- 单行条件 CHECK（v2）：删除标记只落在草稿上（`ck_article_deleted`）、操作日志成功与错误码互斥（`ck_oplog_error`）、有目标 ID 必有目标类型（`ck_oplog_target`）；
+- 表级权限：`audit_log`、`sys_operation_log` 只授 SELECT / INSERT；三张字典表和 RBAC 三表只授 SELECT；`user`、`category`、`tag`、`article` 不授 DELETE（INV-04）。
 
 ### 6.2 `AuditWriter` 负责（H）：SRS §6.6 的其余条件字段规则
 
@@ -459,8 +596,11 @@ erDiagram
 
 | 规则 | 负责人 | 内容 | 失败响应 |
 |---|---|---|---|
-| USER-01 | B | 注册只建 `EDITOR`；本期没有改角色、建管理员的接口 | — |
-| TAX-01 | F | 被任意文章引用的分类、标签不能改名：`SELECT … FOR UPDATE` 锁行后 `EXISTS` 检查 | `409 40904` |
+| USER-01 | B | 注册只建 `EDITOR`，没有通过接口直接创建管理员的路径 | — |
+| USER-02 | G（调 B 的 `UserService`） | 停用或降级后启用管理员数为 0 时拒绝；管理员不能停用或降级自己；锁定方式：`SELECT … FROM user WHERE role_id = ADMIN AND status = 'ENABLED' FOR UPDATE` 后计数 | `409 40909` |
+| USER-03 | G | 只有名下没有任何文章（含已逻辑删除的）的编辑可以升为管理员 | `409 40910` |
+| TAX-01 | F | 被任意**未删除**文章引用的分类、标签不能改名、改父级、删除：`SELECT … FOR UPDATE` 锁行后 `EXISTS (… deleted = 0)` 检查 | `409 40904` |
+| TAX-02 | F | 分类深度 ≤ 2、不成环、父分类必须是未删除的一级分类；有未删除子分类不能删除；停用分类不能被文章选用（C 调 F 校验） | `400 40016` / `409 40908` / `400 40015` |
 | MEDIA-01 | E | 上传时用途与真实格式的大类一致（封面、正文图片只能是 IMAGE，音频只能是 AUDIO） | `400 40006` |
 | MEDIA-02 | C 调 E | `cover_media_id` / `audio_media_id` 指向的媒体必须属于本文章、用途分别为 COVER / AUDIO | `400 40005` |
 | MEDIA-03 | G（`ContentValidator`）调 E | 正文引用的 `/api/media/{id}` 必须属于本文章、用途为 INLINE_IMAGE | `400 40005` |
@@ -476,7 +616,7 @@ SELECT a.id, s.id AS current_submission_id, s.created_at AS submitted_at
 FROM article a
 JOIN audit_log s ON s.id = (SELECT MAX(x.id) FROM audit_log x
                             WHERE x.article_id = a.id AND x.action = 'SUBMIT')
-WHERE a.status = 'PENDING_REVIEW'
+WHERE a.status = 'PENDING_REVIEW'   -- 待审核文章不可能被删除，无需 deleted 条件
 ORDER BY s.created_at, a.id;
 
 -- 最近一次驳回或下架（arch §5.6）：只对已过滤、已分页的文章 ID 查
@@ -491,8 +631,15 @@ SELECT id, version_code FROM review_standard
 WHERE effective_from <= ? ORDER BY effective_from DESC LIMIT 1;
 
 -- 分类 / 标签 in_use
-SELECT EXISTS (SELECT 1 FROM article WHERE category_id = ?);
-SELECT EXISTS (SELECT 1 FROM article_tag WHERE tag_id = ?);
+SELECT EXISTS (SELECT 1 FROM article WHERE category_id = ? AND deleted = 0);
+SELECT EXISTS (SELECT 1 FROM article_tag WHERE tag_id = ?);  -- 已删除文章的 article_tag 行已被物理删除
+
+-- 分类树（一次全量查，内存组树；N+1 落点）
+SELECT id, parent_id, name, sort_order, status FROM category
+WHERE deleted = 0 ORDER BY parent_id IS NOT NULL, parent_id, sort_order, id;
+
+-- 按一级分类筛选含子分类（BR-SEARCH-008）
+… WHERE a.deleted = 0 AND a.category_id IN (SELECT id FROM category WHERE deleted = 0 AND (id = ? OR parent_id = ?))
 
 -- 媒体的 mime、存储路径、linked
 SELECT m.id, f.mime_type, m.size_bytes, m.linked_at IS NOT NULL AS linked,
@@ -510,19 +657,22 @@ WHERE m.id = ?;
 
 | 版本 | 所有者 | 内容 | 依赖 |
 |---|---|---|---|
-| `V1__user.sql` | B | `user` + 唯一管理员种子 | — |
-| `V2__login_throttle.sql` | B | `login_throttle` | — |
-| `V3__taxonomy.sql` | F | `category`、`tag` | — |
-| `V4__article.sql` | C | `article`（含 `cover_media_id` / `audio_media_id` 两列，暂不加外键） | V1、V3 |
-| `V5__article_tag.sql` | F | `article_tag` | V3、V4 |
-| `V6__media.sql` | E | `media_format` + 8 行种子、`media_file`、`media_purge_job` | V4 |
-| `V7__review_lookup.sql` | D | `reject_category` + 8 行、`review_standard` + 1 行 | — |
-| `V8__audit_log.sql` | H | `audit_log` | V1、V4、V7 |
-| `V9__article_media_fk.sql` | C | `article.cover_media_id` / `audio_media_id` → `media_file` 外键 | V4、V6 |
+| `V1__rbac.sql` | B | `role`、`permission`、`role_permission` + 种子（2 角色、27 权限点、34 行） | — |
+| `V2__user.sql` | B | `user` + 初始管理员种子 | V1 |
+| `V3__login_throttle.sql` | B | `login_throttle` | — |
+| `V4__taxonomy.sql` | F | `category`（两级树）、`tag` | — |
+| `V5__article.sql` | C | `article`（含 `cover_media_id` / `audio_media_id` 两列，暂不加外键） | V2、V4 |
+| `V6__article_tag.sql` | F | `article_tag` | V4、V5 |
+| `V7__media.sql` | E | `media_format` + 8 行种子、`media_file`、`media_purge_job` | V5 |
+| `V8__review_lookup.sql` | D | `reject_category` + 8 行、`review_standard` + 1 行 | — |
+| `V9__audit_log.sql` | H | `audit_log` | V2、V5、V8 |
+| `V10__sys_operation_log.sql` | H | `sys_operation_log` | V2 |
+| `V11__article_media_fk.sql` | C | `article.cover_media_id` / `audio_media_id` → `media_file` 外键 | V5、V7 |
 | `R__app_grants.sql` | B | 应用账号权限 | 全部 |
 
+- v1 的 V1～V9 编号**作废**（从未合并进 `main`，也没有任何代码依赖），按上表重排。
 - 之后的迁移按 `V<下一个空号>__<表>_<说明>.sql` 追加；已合并的迁移不得修改。
-- 权限（`R__app_grants.sql`）：8 张业务表授 CRUD；3 张字典表只授 SELECT；`audit_log` 只授 SELECT、INSERT（INV-04）。
+- 权限（`R__app_grants.sql`）：`login_throttle`、`article_tag`、`media_file`、`media_purge_job` 授 CRUD；`user`、`category`、`tag`、`article` 授 SELECT / INSERT / UPDATE（逻辑删除或不可删除，不授 DELETE）；3 张字典表与 3 张 RBAC 表只授 SELECT；`audit_log`、`sys_operation_log` 只授 SELECT、INSERT（INV-04）。GRANT 只增不减，收紧权限时先 REVOKE。
 - 参考 DDL 原文：`doc/db/schema-reference.sql`（按上表顺序拼接）。
 
 ---
@@ -535,34 +685,37 @@ WHERE m.id = ?;
    3. 校验 `cover_media_id` / `audio_media_id`（MEDIA-02），并对涉及的媒体行加锁；
    4. 新引用的媒体置 `linked_at = now`；
    5. 更新 `article`（含两列外键，`version + 1`）；
-   6. 不再被引用的旧媒体（被替换的封面、正文删掉的图）：**先更新文章、再删媒体行**，否则会撞 V9 的外键；
+   6. 不再被引用的旧媒体（被替换的封面、正文删掉的图）：**先更新文章、再删媒体行**，否则会撞 V11 的外键；
    7. 事务提交后删除这些文件；失败写 `media_purge_job`。
 2. **24 小时未关联清理**（E，`@Scheduled`）：扫 `linked_at IS NULL AND created_at <= now - 24h`；逐行 `SELECT … FOR UPDATE` 后再确认一次 `linked_at IS NULL`，删行、提交、删文件，失败写 `media_purge_job`。保存路径在同一行锁下置 `linked_at`，两者不会互相误删（BR-MEDIA-004）。
-3. **删除草稿**（C，BR-DEL-001～004）：条件是 `DRAFT` 且没有任何留痕（`audit_log` 的 RESTRICT 外键兜底，撞上即 `409 40903`）。同一事务内：两列媒体引用置 NULL → 删 `media_file` → 删 `article_tag` → 删 `article`；提交后删文件，失败写 `media_purge_job`。
+3. **删除草稿（逻辑删除）**（C，BR-DEL-001～004）：条件是 `DRAFT` 且没有任何留痕——v2 起不再物理删除文章，`audit_log` 外键兜底不再生效，所以必须在 `SELECT … FOR UPDATE` 锁住文章后显式 `NOT EXISTS (SELECT 1 FROM audit_log WHERE article_id = ?)`，否则 `409 40903`。同一事务内：两列媒体引用置 NULL → 删 `media_file` → 删 `article_tag` → `UPDATE article SET deleted = id WHERE id = ? AND deleted = 0`（`@TableLogic` 的 `removeById`，见 §1 M0 验证项）；提交后删文件，失败写 `media_purge_job`。批量删除 #42 对每条独立执行这一流程（BR-BATCH-003）。
 4. **文件删除重试**（E，`@Scheduled`）：扫 `next_attempt_at <= now`；成功或文件已不存在 → 删行；失败 → `attempts + 1`、`next_attempt_at` 按退避推迟（如 1、2、4 … 分钟，上限 1 小时）、记 `last_error`。
 5. **审核通过或驳回**（D 经 G、H）：锁文章 → 查本轮 SUBMIT 的 ID → 与请求的 `submission_id` 比较，不同 → `409 40901` → 状态迁移 + `AuditWriter` 写留痕（`related_submission_id`），撞 `uk_audit_submission_once` 同样映射为 `40901`。
 6. **到期自动发布**（E 经 G、H）：每篇一个 `REQUIRES_NEW` 事务；`UPDATE article … WHERE status='SCHEDULED' AND scheduled_publish_time <= now`，同事务 INSERT `AUTO_PUBLISH`（`actor_type='SYSTEM'`、`related_approval_id` = 本周期有效的审核通过）。撞 `uk_audit_approval_once` 说明本周期已发布，回滚即可。
-7. **登录**（B）：见 §4.2。
+7. **登录**（B）：见 §4.2。停用账号（`status = 'DISABLED'`）按普通失败响应 401，不暴露"已停用"（BR-USER-001）。
+8. **批量审核 / 下架 / 删除**（D、C）：每条一个独立事务（`TransactionTemplate` 或另一个 Bean 上的 `REQUIRES_NEW` 方法，避免自调用导致事务失效），按单条接口的完整规则执行，一条失败不回滚其他条（BR-BATCH-003）。
+9. **操作日志**（H）：见 §4.12，独立事务、尽力写入。
 
 ---
 
 ## 10. 人 × 表
 
-图例：**W** 所有者（本人 Mapper 写）；**w** 经所有者的 Service 写；**R** 本模块 SQL 只读 / 联表；**r** 经所有者的 Service 读；**G** 数据库权限（DCL）。
+图例：**W** 所有者（本人 Mapper 写）；**w** 经所有者的 Service 写；**R** 本模块 SQL 只读 / 联表。与 `doc/context/team-division.md` 一致。
 
-| 人 | user | login_throttle | category | tag | article | article_tag | media_format | media_file | media_purge_job | reject_category | review_standard | audit_log | 真实读写的表数 | 拥有的迁移 |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| A | — | — | R | R | R | R | R | R | — | — | — | — | **6** | 无 |
-| B | **W** | **W** | — | — | R | — | — | — | — | — | — | G | **3**（另有 G） | V1、V2、R__ |
-| C | R | — | r | r | **W** | w | r | w | w | — | — | r | **9** | V4、V9 |
-| D | R | — | R | R | w/R | R | — | r | — | **W** | **W** | w/r | **9** | V7 |
-| E | — | — | — | — | R/w | — | **W** | **W** | **W** | — | — | w/r | **5** | V6 |
-| F | — | — | **W** | **W** | R | **W** | — | — | — | — | — | — | **4** | V3、V5 |
-| G | — | — | r | — | **W**(状态列) | — | — | r | — | — | r | w | **5** | 无 |
-| H | R | — | — | — | R | — | — | — | — | R | R | **W** | **5** | V8 |
+| 人 | role | permission | role_permission | user | login_throttle | category | tag | article | article_tag | media_format | media_file | media_purge_job | reject_category | review_standard | audit_log | sys_operation_log | 合计 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| A | | | | | | R | R | R | R | R | R | | | | | | **6** |
+| B | **W** | **W** | **W** | **W** | **W** | | | R | | | | | | | | | **6** |
+| C | | | | R | | R | R | **W** | w | R | w | w | | | R | | **9** |
+| D | | | | R | | R | R | w | R | | R | | **W** | **W** | w | | **9** |
+| E | | | | | | | | R/w | | **W** | **W** | **W** | | | w | | **5** |
+| F | | | | | | **W** | **W** | R | **W** | | | | | | | | **4** |
+| G | R | | | w | | R | | **W**(状态列) | | | R | | | R | w | | **7** |
+| H | | | | R | | | | R | | | | | R | R | **W** | **W** | **6** |
 
-- 每人真实读写的表都 ≥ 3 张（`G` 不计入）。B 现在拥有 `user`、`login_throttle` 两张并读 `article`（闸门），之前"第 3 张表只是权限接触"的问题已解决，#19 不用挪。
-- 每张表只有一个所有者。
+- 每人真实读写的表都 ≥ 3 张；每张表只有一个所有者（W）。
+- 拥有的迁移：B V1、V2、V3、R__；F V4、V6；C V5、V11；E V7；D V8；H V9、V10；A、G 无。
+- `sys_operation_log` 由 H 的切面统一写入，其他人不直接写（各模块只在 Controller 方法上加 `@OperationLog` 注解），因此不计入其他人的表数。
 
 ---
 
@@ -589,15 +742,51 @@ WHERE m.id = ?;
 | `audit_log` 10 条条件 CHECK + 复合自引用外键（含生成列） | 报错难排查、MyBatis-Plus 映射复杂；改为 3 条关键 CHECK + `AuditWriter`（§6.2） |
 | 封面 / 音频改用 `media_file.linked_at` + 函数唯一索引 | 见 §0.3、§5.4 |
 | `media_file.media_kind` 生成列 + 复合外键 | 改由上传 Service 校验（MEDIA-01） |
-| `user` 函数唯一索引"最多一个管理员" | 改由 USER-01 保证 |
+| `user` 函数唯一索引"最多一个管理员" | v2 取消"唯一管理员"，改为 USER-02 "至少一个启用管理员" |
 | 登录失败计数放 `user` 上，或放内存 | 不存在的登录名无处可记；重启丢失 |
 | `media_file` 状态列（PENDING / LINKED / DETACHED） | LINKED 可由 `linked_at` 推出；DETACHED 行留在表里，判权要多一个分支 |
-| `article_status`、`role`、`audit_action` 字典表 | 没有附属属性，`VARCHAR + CHECK` 足够 |
+| `article_status`、`audit_action`、日志 `module` 字典表 | 没有附属属性，`VARCHAR + CHECK` 足够（v2 的 `role` 有中文名并承载 RBAC 关联，所以建了表） |
+| `user_role` 多对多（`user_id` 唯一） | 只是"看起来像多对多"；`user.role_id` 单值外键在结构上就不可能多角色，少一张表（决策 D1） |
+| `audit_log` 与 `sys_operation_log` 合并 | 两者事务要求相反（同事务 vs 独立事务），留痕的 CHECK、唯一键在合表后无法成立（决策 D8） |
+| `article.deleted_at` / `created_by` / `updated_by` | 没有规则使用；时间与操作人由 `sys_operation_log` 回答 |
+| 三级及以上分类（递归 CTE） | 两级时"含子分类"就是一次 `IN`；评分没有差别（决策 D4） |
 | 文章状态按留痕回放（事件溯源） | 与状态机门闩、条件 UPDATE 的架构冲突 |
 
 ---
 
 ## 附录 A：验证记录（2026-11-23）
+
+### A.1 v2（16 张表）
+
+环境：本机 MySQL 8.4.6 空库（`DROP DATABASE` 后重建、`cms_app` 账号重新创建），执行 `schema-reference.sql` 全文（V1～V11 + `R__app_grants.sql`）成功：16 张表；`role` 2 行、`permission` 27 行、`role_permission` 34 行（EDITOR 14、ADMIN 20）；初始管理员 `role_id` = ADMIN；`cms_app` 共 16 条表级授权。验证脚本与输出存档在仓库外（`/workspace/cms-plan/v26-sql-verify/`）。
+
+**正例 13 条全部通过**（多数以 `cms_app` 身份执行）：编辑注册写 `role_id`；一级、二级、停用分类；标签；文章（二级分类）与文章标签；媒体带中文原始文件名；按一级分类含子分类筛选；**逻辑删除草稿**（同事务删 `article_tag`、`media_file` 后 `UPDATE article SET deleted = id`，即 MP `delval = "id"` 的等价 SQL）；逻辑删除标签、二级分类后重建同名；无文章的编辑升为管理员、停用账号；操作日志（成功、业务失败、匿名登录失败）；权限集一条 SQL；v1 留痕链回归（SUBMIT → REJECT）。
+
+**反例 38 条全部被拒**：
+
+| 被拒的写入 | 拦截者 |
+|---|---|
+| 未知角色代码、重复角色代码 | `ck_role_code`、`uk_role_code` |
+| 权限点大写、缺动作段、重复 | `ck_permission_code`、`uk_permission_code` |
+| 重复的角色-权限、指向不存在的权限点 | PK、`fk_role_permission_permission` |
+| `user.role_id` 不存在或为空、账号状态非法、大写登录名 | `fk_user_role`、NOT NULL、`ck_user_status`、`ck_user_username` |
+| 分类状态非法、父分类不存在、未删除分类重名、删除标记为负 | `ck_category_status`、`fk_category_parent`、`uk_category_name`、`ck_category_deleted` |
+| 未删除标签只差大小写 | `uk_tag_name` |
+| 非草稿文章打删除标记 | `ck_article_deleted` |
+| 媒体原始文件名全空白或为空 | `ck_media_original_name`、NOT NULL |
+| 操作日志：未知模块、小写操作名、GET 方法、成功带错误码、失败无错误码、有目标 ID 无类型、操作人不存在 | `ck_oplog_module`、`ck_oplog_operation`、`ck_oplog_method`、`ck_oplog_error`、`ck_oplog_target`、`fk_oplog_operator` |
+| v1 回归：驳回缺意见、同一轮二次审核结论 | `ck_audit_reject`、`uk_audit_submission_once` |
+| 应用账号物理 DELETE `article` / `category` / `tag` / `user` | 表级权限 |
+| 应用账号 INSERT `role` / `permission` / `role_permission`（给编辑授 `review:approve`） | 表级权限（BR-RBAC-002） |
+| 应用账号 UPDATE / DELETE `sys_operation_log`、UPDATE `audit_log` | 表级权限 |
+
+`EXPLAIN`：编辑文章列表 `WHERE author_id = ? AND deleted = 0 AND status = ? ORDER BY updated_at DESC` 走 `idx_article_author_status` 覆盖索引；公开列表走 `idx_article_status_published`；分类同级排序走 `idx_category_parent_sort`；操作日志分页走 `idx_oplog_time`（覆盖、反向扫描），按操作人走 `idx_oplog_operator_time`；权限集两表都走主键。
+
+**没有在库里验证、留给 M0 的**：MyBatis-Plus `@TableLogic(delval = "id")` 生成的 SQL（§1 M0 验证项，B）。
+
+### A.2 v1（12 张表，存档）
+
+> 以下为 v1 的记录，迁移号为 v1 编号；v2 已把 `user.role` 换成 `role_id`、把物理删除换成逻辑删除，其中"删除被引用的分类、标签删草稿"两项的拦截方式已改为 Service（§4.3、§9）。
 
 环境：本机 MySQL 8.4.6 空库，依次执行 V1～V9 和 `R__app_grants.sql`，全部成功；用合并后的 `schema-reference.sql` 在空库上重跑一次，同样成功。
 
