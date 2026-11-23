@@ -371,7 +371,7 @@ CREATE TABLE sys_operation_log (
   CONSTRAINT ck_oplog_operation CHECK (operation REGEXP '^[A-Z][A-Z_]*$'),
   CONSTRAINT ck_oplog_method    CHECK (http_method IN ('POST', 'PUT', 'PATCH', 'DELETE')),
   CONSTRAINT ck_oplog_target    CHECK (target_id IS NULL OR target_type IS NOT NULL),
-  CONSTRAINT ck_oplog_error     CHECK ((success AND error_code IS NULL) OR (NOT success AND error_code IS NOT NULL))
+  CONSTRAINT ck_oplog_error     CHECK ((success AND error_code IS NULL) OR (NOT success AND error_code IS NOT NULL AND error_code <> 0))
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '系统操作日志（运维审计）';
 
 -- ==================== V11__article_media_fk.sql ====================

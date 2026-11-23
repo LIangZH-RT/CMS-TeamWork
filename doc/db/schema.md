@@ -1,6 +1,6 @@
 # 数据库表规格（v2：16 张表，对应 SRS v2.6）
 
-> 依据：`CMS-SRS.md` v2.6（主文档）、`doc/context/architecture.md` §4～§7、`doc/api/api-spec.md` 草案 v0.1。
+> 依据：`CMS-SRS.md` v2.6（主文档）、`doc/context/architecture.md` §4～§7、`doc/api/api-spec.md` 草案 v0.2。
 > 本文是 16 张表的**字段级定义**，也是各表所有者写 Flyway 迁移的唯一依据。与 SRS 冲突时以 SRS 为准；与 api-spec 冲突时，接口字段以 api-spec 为准、存储以本文为准。
 > 参考 DDL：`doc/db/schema-reference.sql`。它**只是参考脚本，不是迁移**；后端脚手架建好后，由各表所有者按 §8 的版本号拆进 `src/main/resources/db/migration/`。
 > 2026-11-23 起生效。改本文 = 改表结构，只能走 docs PR，由 A 批准；已合并的迁移不改，只追加。
@@ -64,6 +64,7 @@
 - **时间一律 `DATETIME(3)`，存 UTC。** 接口层按 SRS §5.5、api-spec §1.3 输出 `+08:00`。不用 `TIMESTAMP`，避开 2038 年问题和会话时区的隐式换算。时间值由应用传入（同一批次共用一个 `now`，architecture §6.1），列上不设默认值。
 - **自动填充（v2）**：`created_at` / `updated_at` 由 MyBatis-Plus `MetaObjectHandler` 统一填充（insert 填两者，update 填 `updated_at`），业务代码不手写（SRS §7.2）。文章状态迁移用 `LambdaUpdateWrapper` 且不传实体，MP 不触发填充，所以审核、发布不改 `article.updated_at`（它的语义是"内容最后修改时间"）。不加 `created_by` / `updated_by`：没有规则使用它，"谁做的"由 `sys_operation_log` 回答。
 - **逻辑删除（v2）**：`article`、`category`、`tag` 有 `deleted BIGINT NOT NULL DEFAULT 0`。未删除为 `0`，删除时写入本行 `id`，这样 (`name`,`deleted`) 唯一键允许删除后重建同名（BR-DEL-007）。MP 写法 `@TableLogic(value = "0", delval = "id")`。
+  - 实体的 `deleted` 字段**必须声明为 `Long`**（与 `id` 同为 BIGINT）。MP 只在字段是字符串类型时给 `delval` 加引号，声明成 `String` 会拼出 `deleted = 'id'`。
   - **M0 验证项（B）**：在真库上确认所用 MyBatis-Plus 版本把 `delval = "id"` 原样拼成 `SET deleted = id`。如果它被当成字符串字面量 `'id'` 或报错，就改为各 Service 用 `LambdaUpdateWrapper.setSql("deleted = id")` 写自定义删除方法，查询过滤仍由 `@TableLogic` 自动完成。等价 SQL 已在附录 A 验证可执行。
   - MySQL 不允许 CHECK 引用 `AUTO_INCREMENT` 列，所以"`deleted` 只能是 0 或本行 id"不在库里约束，由删除方法保证；库里只放 `deleted >= 0`。
   - 手写 SQL（Mapper XML、窗口函数）必须显式带 `deleted = 0`，MP 的自动条件不覆盖 XML（SRS X-DEL-01）。
@@ -124,7 +125,7 @@
 | 15 | `audit_log` | H | 事件 | 7 类流程留痕，只增不改不删 |
 | 16 | `sys_operation_log` | H | 事件 | 系统操作日志（全部后台写操作与登录登出），只增不改不删 |
 
-评分表"用户 / 角色 / 权限 / 文章 / 分类 / 日志六表关联"对应：`user` → `role` →（`role_permission`）→ `permission`；`article` → `category`（自引用两级）；`sys_operation_log` / `audit_log` → `user`、`article`。
+评分表"用户 / 角色 / 权限 / 文章 / 分类 / 日志六表关联"对应：`user` → `role` →（`role_permission`）→ `permission`；`article` → `category`（自引用两级）；`sys_operation_log` → `user`（`target_id` 是多态字段，不设外键）；`audit_log` → `user`、`article`。
 
 ```mermaid
 erDiagram
@@ -415,6 +416,7 @@ erDiagram
 
 - 全键表，没有非主属性，**BCNF / 4NF / 5NF**。
 - v2：标签、分类改为逻辑删除后，外键 RESTRICT 不再拦截"删除被引用的标签 / 分类"（行没有被物理删除）。"被引用不能改名、不能删除"统一由 F 的 Service 在 `SELECT … FOR UPDATE` 锁住标签 / 分类行后做 `EXISTS` 检查（规则 TAX-01）。文章逻辑删除时，同一事务物理删除它的 `article_tag` 行（BR-DEL-004），所以 `article_tag` 里不会残留已删除文章的引用。
+- v2：外键只保证"行存在"，不保证"未删除"（库会接受文章引用已逻辑删除的分类或标签）。因此**保存端也要加锁**：C 保存文章时调用 F 的 `TaxonomyService`，用 `FOR SHARE` 锁住并校验所选分类、标签 `deleted = 0`（规则 TAX-03）。删除端的 `FOR UPDATE` 与保存端的 `FOR SHARE` 互斥，并发时两者串行，不会出现"文章挂到刚删除的标签上"（BR-TAX-005）。
 
 ### 4.6 `media_format`（E，字典，运行时只读）
 
@@ -534,7 +536,7 @@ erDiagram
 | `request_uri` | VARCHAR(200) ascii_bin | 否 | | 不含查询串 | |
 | `client_ip` | VARCHAR(45) ascii_bin | 否 | | IPv6 最长 45 | |
 | `success` | BOOLEAN | 否 | 见 `ck_oplog_error` | 业务失败也记一条 | BR-OPLOG-004 |
-| `error_code` | INT | 是 | CHECK 成功时为空、失败时非空 | api §3.3 的业务码 | |
+| `error_code` | INT | 是 | CHECK 成功时为空、失败时非空且不为 0 | api §3.3 的业务码 | |
 | `duration_ms` | INT UNSIGNED | 否 | | | |
 | `created_at` | DATETIME(3) | 否 | 索引 (`created_at`,`id`) | | BR-OPLOG-005 |
 
@@ -598,8 +600,9 @@ erDiagram
 |---|---|---|---|
 | USER-01 | B | 注册只建 `EDITOR`，没有通过接口直接创建管理员的路径 | — |
 | USER-02 | G（调 B 的 `UserService`） | 停用或降级后启用管理员数为 0 时拒绝；管理员不能停用或降级自己；锁定方式：`SELECT … FROM user WHERE role_id = ADMIN AND status = 'ENABLED' FOR UPDATE` 后计数 | `409 40909` |
-| USER-03 | G | 只有名下没有任何文章（含已逻辑删除的）的编辑可以升为管理员 | `409 40910` |
+| USER-03 | G | 只有名下没有任何文章（含已逻辑删除的）的编辑可以升为管理员。这是 SRS 写明的唯一一处**不排除**已删除记录的查询（BR-DEL-002 例外）：不能用 MP 的 `selectCount`（会自动带 `deleted = 0`），要在 Mapper XML 里手写 `SELECT EXISTS (SELECT 1 FROM article WHERE author_id = ?)` | `409 40910` |
 | TAX-01 | F | 被任意**未删除**文章引用的分类、标签不能改名、改父级、删除：`SELECT … FOR UPDATE` 锁行后 `EXISTS (… deleted = 0)` 检查 | `409 40904` |
+| TAX-03 | F 提供，C 调用 | 保存文章（#7、#9）时，在同一事务里 `SELECT id FROM category WHERE id = ? AND deleted = 0 FOR SHARE` 与 `SELECT id FROM tag WHERE id IN (…) AND deleted = 0 FOR SHARE`；查不到或数量不符 | `400 40008` |
 | TAX-02 | F | 分类深度 ≤ 2、不成环、父分类必须是未删除的一级分类；有未删除子分类不能删除；停用分类不能被文章选用（C 调 F 校验） | `400 40016` / `409 40908` / `400 40015` |
 | MEDIA-01 | E | 上传时用途与真实格式的大类一致（封面、正文图片只能是 IMAGE，音频只能是 AUDIO） | `400 40006` |
 | MEDIA-02 | C 调 E | `cover_media_id` / `audio_media_id` 指向的媒体必须属于本文章、用途分别为 COVER / AUDIO | `400 40005` |
@@ -674,6 +677,7 @@ WHERE m.id = ?;
 - 之后的迁移按 `V<下一个空号>__<表>_<说明>.sql` 追加；已合并的迁移不得修改。
 - 权限（`R__app_grants.sql`）：`login_throttle`、`article_tag`、`media_file`、`media_purge_job` 授 CRUD；`user`、`category`、`tag`、`article` 授 SELECT / INSERT / UPDATE（逻辑删除或不可删除，不授 DELETE）；3 张字典表与 3 张 RBAC 表只授 SELECT；`audit_log`、`sys_operation_log` 只授 SELECT、INSERT（INV-04）。GRANT 只增不减，收紧权限时先 REVOKE。
 - 参考 DDL 原文：`doc/db/schema-reference.sql`（按上表顺序拼接）。
+- 执行方式（v2.6 修订，决策 T5）：不用 Spring Boot，由 `FlywayConfig` 里的 `Flyway` Bean 在应用启动时 `migrate()`（architecture §2.10），迁移脚本仍放 `src/main/resources/db/migration`。迁移使用单独的迁移账号（有 DDL 与授权权限），应用账号只持有 `R__app_grants.sql` 授予的权限。
 
 ---
 
@@ -681,6 +685,7 @@ WHERE m.id = ?;
 
 1. **保存文章并变更媒体引用**（C 调 E 的 `MediaRefService`、G 的 `ContentValidator`，同一个 `@Transactional`）：
    1. `SELECT … FOR UPDATE` 锁文章，校验归属与状态；`expected_version` 与 `version` 不符 → `409 40907`；
+      - 接着按 TAX-03 用 `FOR SHARE` 锁并校验所选分类、标签未删除（不符 → `400 40008`），按 TAX-02 校验分类未停用（→ `400 40015`）；
    2. `ContentValidator` 解析正文，得到引用的正文图片集合，校验都属于本文、用途为 INLINE_IMAGE（MEDIA-03）；
    3. 校验 `cover_media_id` / `audio_media_id`（MEDIA-02），并对涉及的媒体行加锁；
    4. 新引用的媒体置 `linked_at = now`；
@@ -700,7 +705,7 @@ WHERE m.id = ?;
 
 ## 10. 人 × 表
 
-图例：**W** 所有者（本人 Mapper 写）；**w** 经所有者的 Service 写；**R** 本模块 SQL 只读 / 联表。与 `doc/context/team-division.md` 一致。
+图例：**W** 所有者（本人 Mapper 写）；**w** 经所有者的 Service 写；**R** 本模块 SQL 只读 / 联表。与 `doc/context/team-division.md` 一致。2026-11-23 修订：#36 / #37（角色、权限点只读）移给 G（决策 T8），G 增加 `permission`、`role_permission` 两张只读表；G 的状态机经 C 的 `ArticleRepository` 改 `article.status`，记为 **w**（原写作「**W**(状态列)」，与"每张表只有一个所有者"矛盾）。
 
 | 人 | role | permission | role_permission | user | login_throttle | category | tag | article | article_tag | media_format | media_file | media_purge_job | reject_category | review_standard | audit_log | sys_operation_log | 合计 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -710,7 +715,7 @@ WHERE m.id = ?;
 | D | | | | R | | R | R | w | R | | R | | **W** | **W** | w | | **9** |
 | E | | | | | | | | R/w | | **W** | **W** | **W** | | | w | | **5** |
 | F | | | | | | **W** | **W** | R | **W** | | | | | | | | **4** |
-| G | R | | | w | | R | | **W**(状态列) | | | R | | | R | w | | **7** |
+| G | R | R | R | w | | R | | w | | | R | | | R | w | | **9** |
 | H | | | | R | | | | R | | | | | R | R | **W** | **W** | **6** |
 
 - 每人真实读写的表都 ≥ 3 张；每张表只有一个所有者（W）。
@@ -762,7 +767,7 @@ WHERE m.id = ?;
 
 **正例 13 条全部通过**（多数以 `cms_app` 身份执行）：编辑注册写 `role_id`；一级、二级、停用分类；标签；文章（二级分类）与文章标签；媒体带中文原始文件名；按一级分类含子分类筛选；**逻辑删除草稿**（同事务删 `article_tag`、`media_file` 后 `UPDATE article SET deleted = id`，即 MP `delval = "id"` 的等价 SQL）；逻辑删除标签、二级分类后重建同名；无文章的编辑升为管理员、停用账号；操作日志（成功、业务失败、匿名登录失败）；权限集一条 SQL；v1 留痕链回归（SUBMIT → REJECT）。
 
-**反例 38 条全部被拒**：
+**反例 38 条全部被拒**（2026-11-23 修订后重跑：`ck_oplog_error` 加 `error_code <> 0`，新增反例 1 条，共 39 条，正例 13 条，全部通过）：
 
 | 被拒的写入 | 拦截者 |
 |---|---|
@@ -774,7 +779,7 @@ WHERE m.id = ?;
 | 未删除标签只差大小写 | `uk_tag_name` |
 | 非草稿文章打删除标记 | `ck_article_deleted` |
 | 媒体原始文件名全空白或为空 | `ck_media_original_name`、NOT NULL |
-| 操作日志：未知模块、小写操作名、GET 方法、成功带错误码、失败无错误码、有目标 ID 无类型、操作人不存在 | `ck_oplog_module`、`ck_oplog_operation`、`ck_oplog_method`、`ck_oplog_error`、`ck_oplog_target`、`fk_oplog_operator` |
+| 操作日志：未知模块、小写操作名、GET 方法、成功带错误码、失败无错误码、失败错误码为 0、有目标 ID 无类型、操作人不存在 | `ck_oplog_module`、`ck_oplog_operation`、`ck_oplog_method`、`ck_oplog_error`、`ck_oplog_target`、`fk_oplog_operator` |
 | v1 回归：驳回缺意见、同一轮二次审核结论 | `ck_audit_reject`、`uk_audit_submission_once` |
 | 应用账号物理 DELETE `article` / `category` / `tag` / `user` | 表级权限 |
 | 应用账号 INSERT `role` / `permission` / `role_permission`（给编辑授 `review:approve`） | 表级权限（BR-RBAC-002） |
