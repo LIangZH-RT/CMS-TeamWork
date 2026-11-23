@@ -5,7 +5,7 @@
 | 章 | 内容 | 材料来源 | 执笔 |
 |---|---|---|---|
 | 1 | 概述：项目背景、目标、团队分工表 | `CMS-SRS.md` §1～§2、`doc/context/team-division.md` §0 | A |
-| 2 | 选型依据：从实验二 SSM 到 Spring Boot 3 + MyBatis-Plus；Security + AOP 分工理由；MySQL 8 与 Flyway | `architecture.md` §2、§5.2、§8 | A（B 审） |
+| 2 | 选型依据：从实验二 SSM 到 Spring 6 + Spring MVC + MyBatis-Plus（不用 Spring Boot、Spring Security，手工装配、WAR 部署 Tomcat 10.1）；拦截器（认证、CSRF）+ AOP（权限、日志）分工理由；单一容器与 `ContextLoaderListener` 的取舍；MySQL 8 与 Flyway | `architecture.md` §2（含 §2.10）、§5.1、§5.2、§8 | A（B 审） |
 | 3 | 需求分析：SRS v2.6 摘要（角色、权限矩阵、状态机、业务规则） | `CMS-SRS.md` §4～§7 | A |
 | 4 | 数据库设计：E-R 图、16 张表字段、范式论证、索引与约束、逻辑删除方案 | `doc/db/schema.md` | A 汇总，各表所有者核对 |
 | 5 | 功能详解：按模块（认证与权限、用户管理、分类、文章、审核、媒体、日志、公开接口），每个模块含接口、流程图、关键代码片段 | `api-spec.md`、`doc/design/README.md` | 各模块负责人 |
