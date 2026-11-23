@@ -2,7 +2,7 @@
 // 标签管理（api-spec §4.18）。支持关键字搜索 + 分页。
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
-import { listTags, createTag, renameTag, deleteTag } from '@/api/admin'
+import { listTags, createTag, renameTag, deleteTag } from '@/api/taxonomy'
 
 const loading = ref(false)
 const rows = ref([])

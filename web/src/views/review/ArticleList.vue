@@ -4,7 +4,8 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { listArticles, unpublishArticle } from '@/api/admin'
+import { listArticles } from '@/api/article'
+import { unpublishArticle } from '@/api/review'
 import { fmtDateTime } from '@/utils/format'
 import { ARTICLE_STATUS, ALL_STATUSES, STATUS_LABEL, STATUS_TAG_TYPE } from '@/utils/status'
 

@@ -1,28 +1,23 @@
 <script setup>
-// 管理员后台独立布局（G 负责）。与博客前台 PublicLayout 完全隔离。
-// 侧边栏固定、顶栏显示当前用户与登出。
-// CSRF / 真实登录由 F 的 auth store 接手，G 只消费 isAdmin / user。
+// 后台共用布局（方案 A：编辑与管理员共用，G 负责）。与博客前台 PublicLayout 完全隔离。
+// 侧边栏菜单和顶栏角色标签按 auth.user.role 切换；菜单只由 utils/menu.js 生成，不在这里写死。
+// 登录与角色判断在 router/index.js 的全局 beforeEach（guard.js）里，这里不再重复。
+import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from '@/stores/auth'
+import { ROLE_LABEL, isMenuActive, menuFor } from '@/utils/menu'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuth()
 
-const isAdminRoute = (name) => route.name === name
-const nav = [
-  { name: 'admin-reviews', label: '审核队列', icon: 'DocumentChecked', badge: 'reviews' },
-  { name: 'admin-articles', label: '全部文章', icon: 'Reading' },
-  { name: 'admin-categories', label: '分类管理', icon: 'Menu' },
-  { name: 'admin-tags', label: '标签管理', icon: 'PriceTag' },
-]
+const role = computed(() => auth.user?.role)
+const nav = computed(() => menuFor(role.value, router))
+const roleLabel = computed(() => ROLE_LABEL[role.value] || '')
 
-// 登录与角色判断在 router/index.js 的全局 beforeEach（meta.requiresAdmin）里，这里不再重复
-
-// 登出（mock 占位，F 接真实 #4 接口）
-function onLogout() {
-  auth.user = null
-  auth.csrf_token = null
+// 退出：调 POST /api/auth/logout（#4），由 auth store 清状态，再回博客首页
+async function onLogout() {
+  await auth.logout()
   router.replace({ name: 'blog-home' })
 }
 </script>
@@ -32,29 +27,29 @@ function onLogout() {
     <aside class="sidebar">
       <div class="brand">
         <span class="mark">C</span>
-        <span class="txt">CMS 管理台</span>
+        <span class="txt">CMS 后台</span>
       </div>
       <nav class="nav">
         <router-link
           v-for="n in nav"
-          :key="n.name"
-          :to="{ name: n.name }"
+          :key="n.route"
+          :to="{ name: n.route }"
           class="nav-item"
-          :class="{ on: isAdminRoute(n.name) }"
+          :class="{ on: isMenuActive(n, route) }"
         >
           <span class="dot" />
           {{ n.label }}
         </router-link>
       </nav>
-      <div class="sidebar-foot">v0.1 · admin-page</div>
+      <div class="sidebar-foot">v0.1</div>
     </aside>
 
     <div class="main">
       <header class="topbar">
-        <div class="crumbs">{{ $route.meta?.title || 'CMS 管理台' }}</div>
+        <div class="crumbs">{{ $route.meta?.title || 'CMS 后台' }}</div>
         <div class="user">
           <span class="u-name">{{ auth.user?.username || '加载中...' }}</span>
-          <el-tag v-if="auth.user" size="small" type="primary">管理员</el-tag>
+          <el-tag v-if="roleLabel" size="small" type="primary">{{ roleLabel }}</el-tag>
           <el-button size="small" text @click="onLogout">退出</el-button>
         </div>
       </header>
