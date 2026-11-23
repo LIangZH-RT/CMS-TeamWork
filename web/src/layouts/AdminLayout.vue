@@ -15,10 +15,9 @@ const role = computed(() => auth.user?.role)
 const nav = computed(() => menuFor(role.value, router))
 const roleLabel = computed(() => ROLE_LABEL[role.value] || '')
 
-// 登出（mock 占位，F 接真实 #4 接口）
-function onLogout() {
-  auth.user = null
-  auth.csrf_token = null
+// 退出：调 POST /api/auth/logout（#4），由 auth store 清状态，再回博客首页
+async function onLogout() {
+  await auth.logout()
   router.replace({ name: 'blog-home' })
 }
 </script>
