@@ -1,29 +1,34 @@
-// 分类与标签接口模块（api-spec §9，#20–#27）。分类写操作仅管理员，标签对编辑开放。
-// 复用 http.js 单例，ID 用字符串传。
+// 分类与标签（api-spec §9，#20–#27、#38、#39）。
 import { http } from './http'
 
-// ─── 分类 TAX ───────────────────────────────────────────────────────
-
-export function listCategories() {
-  return http.get('/api/categories')
+export function listCategories({ status } = {}) {
+  return http.get('/api/categories', { params: { status: status || undefined } })
 }
 
-export function createCategory({ name }) {
-  return http.post('/api/categories', { name })
+export function createCategory(body) {
+  return http.post('/api/categories', body)
 }
 
-export function renameCategory(id, { name }) {
-  return http.put(`/api/categories/${encodeURIComponent(id)}`, { name })
+export function updateCategory(id, body) {
+  return http.put(`/api/categories/${encodeURIComponent(id)}`, body)
 }
 
 export function deleteCategory(id) {
   return http.delete(`/api/categories/${encodeURIComponent(id)}`)
 }
 
-// ─── 标签 TAG ───────────────────────────────────────────────────────
+export function updateCategoryStatus(id, status) {
+  return http.put(`/api/categories/${encodeURIComponent(id)}/status`, { status })
+}
 
-export function listTags({ keyword = '', page = 1, page_size = 20 } = {}) {
-  return http.get('/api/tags', { params: { keyword: keyword || undefined, page, page_size } })
+export function sortCategories(body) {
+  return http.put('/api/categories/sort', body)
+}
+
+export function listTags({ keyword = '', page = 1, page_size = 20, sort = '' } = {}) {
+  return http.get('/api/tags', {
+    params: { keyword: keyword || undefined, page, page_size, sort: sort || undefined },
+  })
 }
 
 export function createTag({ name }) {

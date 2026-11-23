@@ -3,17 +3,28 @@
 // 路由顺序：先尝试 admin_handlers → 返回 null 则 fallback 到公开接口的 handlers。
 import { handle } from './handlers.js'
 import { handleAdmin } from './admin_handlers.js'
+import { handleExtra } from './extra_handlers.js'
+
+function readRaw(req) {
+  return new Promise((resolve) => {
+    const chunks = []
+    req.on('data', (c) => chunks.push(c))
+    req.on('end', () => resolve(Buffer.concat(chunks)))
+    req.on('error', () => resolve(Buffer.alloc(0)))
+  })
+}
 
 function readBody(req) {
-  return new Promise((resolve) => {
-    let chunks = []
-    req.on('data', (c) => chunks.push(c))
-    req.on('end', () => {
-      const raw = Buffer.concat(chunks).toString('utf-8')
-      if (!raw) return resolve(null)
-      try { resolve(JSON.parse(raw)) } catch { resolve(null) }
-    })
-    req.on('error', () => resolve(null))
+  return readRaw(req).then((raw) => {
+    const ct = req.headers?.['content-type'] || ''
+    if (ct.includes('multipart/form-data')) {
+      const text = raw.toString('utf8')
+      const usage = /name="usage"\r\n\r\n([^\r\n]+)/.exec(text)?.[1]
+      const filename = /filename="([^"]*)"/.exec(text)?.[1] || 'file.bin'
+      return { __multipart: true, usage, filename, size: raw.length, original_name: filename }
+    }
+    if (!raw.length) return null
+    try { return JSON.parse(raw.toString('utf-8')) } catch { return null }
   })
 }
 
@@ -23,8 +34,16 @@ function middleware(req, res, next) {
   ;(async () => {
     const body = req.method !== 'GET' && req.method !== 'HEAD' ? await readBody(req) : null
 
+    const extraOut = handleExtra(req.method, req.url, body, req.headers || {})
+    if (extraOut) {
+      res.statusCode = extraOut.status
+      for (const [k, v] of Object.entries(extraOut.headers)) res.setHeader(k, v)
+      res.end(req.method === 'HEAD' ? undefined : extraOut.body)
+      return
+    }
+
     // 1) 管理员端接口（/api/{articles,reviews,categories,tags}）
-    const adminOut = handleAdmin(req.method, req.url, body)
+    const adminOut = handleAdmin(req.method, req.url, body, req.headers || {})
     if (adminOut) {
       res.statusCode = adminOut.status
       for (const [k, v] of Object.entries(adminOut.headers)) res.setHeader(k, v)

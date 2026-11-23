@@ -34,3 +34,13 @@ export function rejectArticle(id, { submission_id, reject_category, comment }) {
 export function unpublishArticle(id, { reason }) {
   return http.post(`/api/articles/${encodeURIComponent(id)}/unpublish`, { reason })
 }
+
+/** POST /api/reviews/batch-approve (#40)，去重后最多 50 条 */
+export function batchApprove(items) {
+  return http.post('/api/reviews/batch-approve', { items })
+}
+
+/** POST /api/reviews/batch-unpublish (#41) */
+export function batchUnpublish(article_ids, reason) {
+  return http.post('/api/reviews/batch-unpublish', { article_ids, reason })
+}

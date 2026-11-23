@@ -1,34 +1,76 @@
-// 文章接口模块（api-spec §6，#6、#8、#32）。编辑、管理员共用同一套路径，服务端按角色和归属判定。
-// 编辑端的 #7、#9–#13 由 F 追加，不改已有函数签名。复用 http.js 单例，ID 用字符串传。
+// 文章接口（api-spec §6，#6–#13、#32、#42）。编辑与管理员共用列表路径，范围由服务端决定。
 import { http } from './http'
 
-/** GET /api/articles (#6)：管理员不传 author_id → 全部 */
-export function listArticles({ page = 1, page_size = 20, status = null, category_id = null, tag_ids = [], author_id = null, title = '' } = {}) {
-  return http.get('/api/articles', {
-    params: {
-      page, page_size,
-      status: status || undefined,
-      category_id: category_id || undefined,
-      tag_ids: tag_ids.length ? tag_ids : undefined,
-      author_id: author_id || undefined,
-      title: title || undefined,
-    },
-  })
+function listParams(q = {}) {
+  return {
+    page: q.page ?? 1,
+    page_size: q.page_size ?? 20,
+    status: q.status || undefined,
+    category_id: q.category_id || undefined,
+    tag_ids: q.tag_ids?.length ? q.tag_ids : undefined,
+    author_id: q.author_id || undefined,
+    keyword: q.keyword || q.title || undefined,
+    sort: q.sort || undefined,
+    created_from: q.created_from || undefined,
+    created_to: q.created_to || undefined,
+    updated_from: q.updated_from || undefined,
+    updated_to: q.updated_to || undefined,
+    published_from: q.published_from || undefined,
+    published_to: q.published_to || undefined,
+  }
 }
 
-/** GET /api/articles/{id} (#8)：管理员可看全部状态；待审核时返回 current_submission_id */
+/** GET /api/articles (#6) */
+export function listArticles(query) {
+  return http.get('/api/articles', { params: listParams(query) })
+}
+
+/** GET /api/articles/counts (#32) */
+export function getArticleCounts(query = {}) {
+  const p = listParams(query)
+  delete p.page
+  delete p.page_size
+  delete p.status
+  delete p.sort
+  return http.get('/api/articles/counts', { params: p })
+}
+
+/** GET /api/articles/{id} (#8) */
 export function getArticleDetail(id) {
   return http.get(`/api/articles/${encodeURIComponent(id)}`)
 }
 
-/** GET /api/articles/counts (#32)：6 状态计数 */
-export function getArticleCounts({ category_id = null, tag_ids = [], author_id = null, title = '' } = {}) {
-  return http.get('/api/articles/counts', {
-    params: {
-      category_id: category_id || undefined,
-      tag_ids: tag_ids.length ? tag_ids : undefined,
-      author_id: author_id || undefined,
-      title: title || undefined,
-    },
-  })
+/** POST /api/articles (#7) */
+export function createArticle(body) {
+  return http.post('/api/articles', body)
+}
+
+/** PUT /api/articles/{id} (#9)，必须带 expected_version */
+export function updateArticle(id, body) {
+  return http.put(`/api/articles/${encodeURIComponent(id)}`, body)
+}
+
+/** DELETE /api/articles/{id}?confirm=true (#10)，逻辑删除 */
+export function deleteArticle(id) {
+  return http.delete(`/api/articles/${encodeURIComponent(id)}`, { params: { confirm: true } })
+}
+
+/** POST /api/articles/batch-delete (#42)，最多 50 条 */
+export function batchDeleteArticles(article_ids) {
+  return http.post('/api/articles/batch-delete', { article_ids, confirm: true })
+}
+
+/** POST /api/articles/{id}/submit (#11) */
+export function submitArticle(id) {
+  return http.post(`/api/articles/${encodeURIComponent(id)}/submit`, {})
+}
+
+/** POST /api/articles/{id}/withdraw (#12) */
+export function withdrawArticle(id) {
+  return http.post(`/api/articles/${encodeURIComponent(id)}/withdraw`, {})
+}
+
+/** POST /api/articles/{id}/reschedule (#13) */
+export function rescheduleArticle(id, body) {
+  return http.post(`/api/articles/${encodeURIComponent(id)}/reschedule`, body)
 }

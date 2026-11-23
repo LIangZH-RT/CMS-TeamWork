@@ -7,6 +7,8 @@
 // - 统一解包 {code, message, data}：成功返回 data；失败抛 ApiError。message 只给人看，不做分支（§1.4）
 // - 字段保持 snake_case，不做驼峰转换
 import axios from 'axios'
+import { getCsrf, setCsrf } from './csrf'
+import { explain } from '@/utils/errors'
 
 export class ApiError extends Error {
   constructor(status, code, message, data) {
@@ -35,9 +37,30 @@ export function toApiError(err) {
   const res = err?.response
   if (res) {
     const b = res.data && typeof res.data === 'object' ? res.data : {}
-    return new ApiError(res.status, b.code ?? null, b.message ?? '', b.data ?? null)
+    return new ApiError(res.status, b.code ?? null, explain({ code: b.code, message: b.message }, b.message || ''), b.data ?? null)
   }
   return new ApiError(0, null, err?.message || '网络错误', null)
+}
+
+const WRITE = new Set(['POST', 'PUT', 'DELETE', 'PATCH'])
+
+function needsCsrf(config) {
+  const method = (config.method || 'get').toUpperCase()
+  const url = config.url || ''
+  return WRITE.has(method) && !url.includes('/api/auth/login')
+}
+
+/** 审核通过、驳回等非幂等动作失败后不自动重放（admin-console-plan §2.3） */
+function csrfRetryable(config) {
+  const method = (config.method || 'get').toUpperCase()
+  if (method !== 'PUT' && method !== 'DELETE') return false
+  return true
+}
+
+async function refreshCsrf() {
+  const data = await http.get('/api/auth/csrf')
+  setCsrf(data?.token)
+  return data?.token || null
 }
 
 export const http = axios.create({
@@ -50,4 +73,28 @@ export const http = axios.create({
   paramsSerializer: { indexes: null },
 })
 
-http.interceptors.response.use(unwrap, (err) => Promise.reject(toApiError(err)))
+http.interceptors.request.use((config) => {
+  if (needsCsrf(config)) {
+    const token = getCsrf()
+    if (token) config.headers['X-XSRF-TOKEN'] = token
+  }
+  return config
+})
+
+http.interceptors.response.use(unwrap, async (err) => {
+  const apiErr = toApiError(err)
+  const config = err?.config
+  if (apiErr.code === 40300 && config && !config.__csrfRetried && csrfRetryable(config)) {
+    config.__csrfRetried = true
+    try {
+      const token = await refreshCsrf()
+      if (token) {
+        config.headers['X-XSRF-TOKEN'] = token
+        return http.request(config)
+      }
+    } catch {
+      // 重取失败则把原来的 403 抛给页面
+    }
+  }
+  return Promise.reject(apiErr)
+})
