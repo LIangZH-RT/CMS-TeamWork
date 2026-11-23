@@ -18,11 +18,11 @@
 
 ## Current Goal
 
-按 `doc/context/team-division.md` 进入后端 M0：B 搭工程骨架与 Flyway、H 写 `common/`、各表所有者按 `doc/db/schema.md` 写 V1～V11。本阶段不安排测试。v2.6 新增章节由 A 用自己的话改写定稿（`doc/ai-log/README.md`）。
+按 `doc/context/team-division.md` 进入后端 M0：B 搭纯 Spring MVC 工程骨架（`web.xml` + Java 配置、WAR、Flyway Bean、登录与 CSRF 拦截器骨架，architecture §2.10）、H 写 `common/`（含 Jackson、校验器与 404 映射）、各表所有者按 `doc/db/schema.md` 写 V1～V11。本阶段不安排测试。v2.6 新增章节由 A 用自己的话改写定稿（`doc/ai-log/README.md`）。
 
 ## Completed
 
-**需求基线** —— `CMS-SRS.md` v2.5；`doc/context/project-overview.md` 为背景记录。v2.5 修正六项 P1 复审发现并冻结基线（审核-发布责任与原子性、列表最近驳回/下架展示、正文图片引用与危险协议、留痕字段条件必填、媒体真实格式校验、会话安全基线）。
+**需求基线（历史：v2.5 冻结记录；当前基线为 v2.6，见上文）** —— `CMS-SRS.md` v2.5；`doc/context/project-overview.md` 为背景记录。v2.5 修正六项 P1 复审发现并冻结基线（审核-发布责任与原子性、列表最近驳回/下架展示、正文图片引用与危险协议、留痕字段条件必填、媒体真实格式校验、会话安全基线）。
 - 62 条业务规则（10 组）、6 个文章状态、11 条状态迁移路径、5 条禁止路径、1 条全流程不变量、7 类留痕、17 条必须失败的组合
 - 测试环境账号口径：内容编辑可注册入口直接注册并立即启用；管理员不开放注册，每库初始化时创建且仅一个；不提供密码找回/邮件验证/自助改密
 - 媒体口径：图片 `jpg/jpeg/png/gif/webp` 单文件 5MB（**明确排除 `svg`**）、音频 `mp3/m4a/wav/ogg` 单文件 20MB 走上传、视频**只存 `https` URL**（不限来源域名，禁 HTML/脚本/iframe/嵌入代码，不下载不代理不转码）
@@ -78,7 +78,7 @@
 - §6.1 到期发布去掉 `published_at IS NULL`；INV-07 改为「同周期不覆盖、跨周期更新」
 - §6.2 媒体清理改为未关联满 24 小时／60 秒内清理，并覆盖移除、替换、删文
 - §5.4 媒体判权补「从未关联」与「已失去全部引用」两类
-- §5.1 CSRF 改为会话绑定令牌（`HttpSessionCsrfTokenRepository`）
+- §5.1 CSRF 改为会话绑定令牌（当时用 `HttpSessionCsrfTokenRepository`；2026-11-23 起不用 Spring Security，改为自定义 `CsrfInterceptor`，契约不变）
 
 **2026-11-17～23 管理员后台**（`web/`，PR #6、#7 已合入）
 - 审核队列与详情、全部文章与下架、留痕时间线、分类与标签管理；路由按角色声明并统一守卫，菜单随会话切换
@@ -86,7 +86,7 @@
 
 **2026-11-23 SRS v2.6 补齐课程评分项**（PR #8 追加提交；A 批准方案，D1～D12 全部按推荐）
 - SRS：RBAC（`role`/`permission`/`role_permission`，27 个权限点，一人一角色 `user.role_id`）、用户管理（启停、分配角色，至少一个启用管理员）、`@RequiresPermission` AOP 权限闸（仍统一 404）、`@OperationLog` + `sys_operation_log`、两级分类（排序、启停）、批量审核通过 / 下架 / 删除草稿（≤ 50，逐条独立事务）、文章 / 分类 / 标签逻辑删除、多字段排序白名单、MP 自动填充、媒体下载 #43（实验二延续）；90 条业务规则（14 组）、48 条功能需求（本期 46）、33 条越权与边界用例
-- 表结构 v2：16 张表、迁移重排为 V1～V11 + `R__app_grants`；MySQL 8.4.6 空库重跑 51 项正反例全部通过（schema 附录 A.1）
+- 表结构 v2：16 张表、迁移重排为 V1～V11 + `R__app_grants`；MySQL 8.4.6 空库重跑 51 项正反例全部通过（schema 附录 A.1；2026-11-23 修订 `ck_oplog_error` 后重跑 52 项，全部通过）
 - 接口 v0.2：44 个接口（新增 #33～#44），11 处已有接口改动，7 个新错误码；`openapi.yaml` 经 Redocly lint 通过
 - 架构：权限闸改为 AOP 切面、切面顺序（日志 `@Order(1)` 在外）、批量事务边界、系统架构图与鉴权链 mermaid
 - 分工：每人表数 A6 B6 C9 D9 E5 F4 G7 H6；B 权限切面 + RBAC、H 日志切面、G 用户管理；后端 PR 改 merge commit（D9）；新增 `doc/ai-log/` 过程记录规范与 `doc/design/README.md` 图清单
@@ -128,10 +128,10 @@
 | 5 | `.claude/claude.md` 里的清单仍指向旧 `context/` 路径，且列了 3 个不存在的文件、又缺 `git-standards.md` | **需手工更正**（受保护目录，会话内无权修改） |
 | 6 | 追溯脚本停用 ⇒ 文档之间再没有自动发现漂移的手段 | 已知代价，用户明示"先不用" |
 | 7 | 留痕表里的「改期」是否需要留痕 | 这是推断后补上的（它改变了文章对外可见的时间点），基线已标注待复核，用户尚未明确确认 |
-| 8 | 技术栈名称（D12）：报告写"Spring Boot 3（Spring MVC）+ MyBatis-Plus，基于实验二 SSM 升级"能否被老师接受 | 未决，A 跟老师确认 |
+| 8 | 技术栈名称（D12、T9）：报告写"Spring 6 + Spring MVC + MyBatis-Plus（不用 Spring Boot、Spring Security），基于实验二 SSM 升级"能否被老师接受 | 未决，A 跟老师确认（2026-11-23 技术栈已改，见决策记录） |
 | 9 | AOP 权限闸后，请求体格式 400 先于权限 / 归属 404（api-spec §16-#17） | 暂定接受，A、B 在 M1 前确认 |
 | 10 | `@TableLogic(delval = "id")` 在所用 MP 版本是否生效 | B 在 M0 验证；不行用 `setSql("deleted = id")` |
-| 11 | JDK 版本：architecture 写 Java 21，v2.6 方案的部署说明写 JDK 17 | 未决，B 定版 `pom.xml` 时统一 |
+| 11 | JDK 版本：architecture 写 Java 21，v2.6 方案的部署说明写 JDK 17 | **已决（2026-11-23，T6）**：JDK 21 + Spring Framework 6.2 + Tomcat 10.1 |
 
 ## Architecture Decisions
 
@@ -150,9 +150,13 @@
 否决：Nginx 直托管 + UUID 不可猜路径（"猜不到"不是"不可访问"，与 BR-MEDIA-003 正面冲突）；Nginx `X-Accel-Redirect`（生产标准解，但为性能引入环境复杂度）。
 代价：文件 IO 经过 JVM，音频 20MB 会占用请求线程。
 
-**认证与授权分界：Spring Security 只管认证 / 会话 / CSRF；授权走自研 AOP**（v2.6 起：权限闸 = `@RequiresPermission` + `PermissionAspect`，归属闸 = scope + MP 拦截器，状态闸 = 状态机条件 UPDATE；v2.5 曾是单一 `AuthzInterceptor`）。
+**技术栈改为纯 Spring + Spring MVC + MyBatis-Plus，不用 Spring Boot、Spring Security（2026-11-23，决策 T1～T9）。** `web.xml` + Java 配置类、单一 `DispatcherServlet` 容器（T3、T7）；WAR 部署到 Tomcat 10.1（T4）；Flyway 作为 Spring Bean 在启动时迁移（T5）；Spring 6.2 + JDK 21（T6）；认证用 `AuthInterceptor`（每请求按 `user_id` 查状态与角色），CSRF 用 `CsrfInterceptor` 校验会话绑定令牌（T2），BCrypt 只用 `spring-security-crypto`（T1）；#36/#37 移给 G，Jackson / 校验 / 404 映射移给 H（T8）；老师确认待 A 完成（T9）。见 architecture §2.10、§5.1。
+理由：更贴合「基于实验二 SSM 整合升级」，答辩可以讲清每个 Bean 怎么装配；认证与 CSRF 自研后，拦截器与 AOP 的分工本身就是课程要展示的 Spring 知识点。
+代价：**推翻了下一条里「否决：全自研 Filter + 手写 CSRF」**——会话、CSRF、会话固定这些安全细节要自己写对，写错不报错；没有自动配置，切面、事务、异步漏配会静默失效。对策见 team-division R18、R19（启动时断言 Controller 已被代理、B 的 PR 重点审并附手工验证记录）。
+
+**认证与授权分界（2026-11-23 前的记录；认证一侧已被上一条替换为拦截器）：Spring Security 只管认证 / 会话 / CSRF；授权走自研 AOP**（v2.6 起：权限闸 = `@RequiresPermission` + `PermissionAspect`，归属闸 = scope + MP 拦截器，状态闸 = 状态机条件 UPDATE；v2.5 曾是单一 `AuthzInterceptor`）。
 理由：状态闸不适合写成注解表达式，判定一旦散到注解、Service 与框架配置三处，"权限判断只有一处"这个可证明性根基就没了。本项目对外演示的核心恰恰是这套权限模型。
-否决：全量 Spring Security；全自研 Filter + 手写 CSRF（三样安全细节要自己写对，写错不报错）。
+否决：全量 Spring Security；~~全自研 Filter + 手写 CSRF（三样安全细节要自己写对，写错不报错）~~（2026-11-23 被技术栈调整推翻，见上一条）。授权仍只在 AOP 切面判，这一点不变。
 
 **拒绝响应一律 404，且响应体与"资源不存在"逐字节一致。**
 理由：若角色闸返 403、归属闸返 404，攻击者仅凭状态码就能分辨"这篇文章存在但不是你的"，等于泄露存在性。**401 只保留给"根本没登录"**——它不携带任何目标资源信息，攻击者从自己的登录态本来就知道自己没登录。
