@@ -47,7 +47,7 @@ paths:
       tags:
       - AUTH
       summary: 获取 CSRF 令牌【补充】
-      description: '在响应体返回会话绑定的 CSRF 令牌（HttpSessionCsrfTokenRepository）；不下发可读的 CSRF Cookie。登录、登出后需重新获取。
+      description: '在响应体返回会话绑定的 CSRF 令牌（由 CsrfInterceptor 校验）；不下发可读的 CSRF Cookie。登录、登出后需重新获取。
 
 
         覆盖需求：§4.1.2、FR-AUTH-003'
