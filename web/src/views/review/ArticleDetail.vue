@@ -93,7 +93,7 @@ function goAudit() {
         </div>
         <p v-if="article.excerpt" class="excerpt">{{ article.excerpt }}</p>
         <div class="action-row" v-if="canUnpublish">
-          <el-button type="danger" @click="onUnpublish">下架</el-button>
+          <el-button v-permission="'review:unpublish'" type="danger" @click="onUnpublish">下架</el-button>
         </div>
         <div v-if="article.status === ARTICLE_STATUS.PENDING_REVIEW" class="pending-hint">
           <span class="hint-icon" aria-hidden="true">ⓘ</span>

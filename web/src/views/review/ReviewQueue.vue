@@ -4,7 +4,9 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { getReviewQueue } from '@/api/review'
+import { batchApprove, getReviewQueue } from '@/api/review'
+import BatchResultDialog from '@/components/BatchResultDialog.vue'
+import { explain } from '@/utils/errors'
 import { getArticleCounts } from '@/api/article'
 import { fmtDateTime } from '@/utils/format'
 
@@ -14,6 +16,9 @@ const rows = ref([])
 const total = ref(0)
 const counts = ref(null) // §6.9：{ by_status: { DRAFT… }, total }
 const query = reactive({ page: 1, page_size: 10, category_id: null, author_id: null, title: '' })
+const selected = ref([])
+const batchOpen = ref(false)
+const batchResult = ref(null)
 
 async function load() {
   loading.value = true
@@ -33,6 +38,24 @@ onMounted(load)
 
 function onSearch() { query.page = 1; load() }
 function goDetail(row) { router.push({ name: 'admin-review-detail', params: { id: row.id } }) }
+
+async function onBatchApprove() {
+  if (selected.value.length > 50) {
+    ElMessage.warning('一次最多审核 50 篇')
+    return
+  }
+  try {
+    batchResult.value = await batchApprove(selected.value.map((row) => ({
+      article_id: row.id,
+      submission_id: row.current_submission_id,
+    })))
+    batchOpen.value = true
+    selected.value = []
+    await load()
+  } catch (e) {
+    ElMessage.error(explain(e, '批量审核失败'))
+  }
+}
 </script>
 
 <template>
@@ -61,9 +84,13 @@ function goDetail(row) { router.push({ name: 'admin-review-detail', params: { id
       <el-input v-model="query.author_id" placeholder="作者 ID" style="width: 140px" @keyup.enter="onSearch" />
       <el-button type="primary" @click="onSearch">搜索</el-button>
       <el-button @click="() => { query.title=''; query.author_id=null; onSearch() }">重置</el-button>
+      <el-button v-permission="'review:approve'" type="success" :disabled="!selected.length" @click="onBatchApprove">
+        批量通过（{{ selected.length }}/50）
+      </el-button>
     </div>
 
-    <el-table :data="rows" v-loading="loading" stripe empty-text="暂无待审核文章" style="margin-top: 16px">
+    <el-table :data="rows" v-loading="loading" stripe empty-text="暂无待审核文章" style="margin-top: 16px" row-key="id" @selection-change="(v) => selected = v">
+      <el-table-column type="selection" width="46" />
       <el-table-column label="标题" min-width="260">
         <template #default="{ row }">
           <el-link type="primary" @click="goDetail(row)">{{ row.title }}</el-link>
@@ -80,7 +107,7 @@ function goDetail(row) { router.push({ name: 'admin-review-detail', params: { id
       </el-table-column>
       <el-table-column label="操作" width="140" fixed="right">
         <template #default="{ row }">
-          <el-button type="primary" size="small" @click="goDetail(row)">审核</el-button>
+          <el-button v-permission="'review:queue'" type="primary" size="small" @click="goDetail(row)">审核</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -96,6 +123,7 @@ function goDetail(row) { router.push({ name: 'admin-review-detail', params: { id
         @current-change="load"
       />
     </div>
+    <BatchResultDialog v-model="batchOpen" :result="batchResult" />
   </div>
 </template>
 
