@@ -5,6 +5,7 @@
 import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTaxonomy } from '@/stores/taxonomy'
+import { useAuth } from '@/stores/auth'
 import SearchBox from '@/components/SearchBox.vue'
 
 const NAV_MAX = 6
@@ -12,7 +13,11 @@ const useMock = import.meta.env.VITE_USE_MOCK === 'true'
 const route = useRoute()
 const router = useRouter()
 const taxonomy = useTaxonomy()
-onMounted(() => taxonomy.ensure())
+const auth = useAuth()
+onMounted(() => {
+  taxonomy.ensure()
+  auth.fetchMe().catch(() => {})
+})
 
 const shown = computed(() => taxonomy.categories.slice(0, NAV_MAX))
 const more = computed(() => taxonomy.categories.slice(NAV_MAX))
@@ -48,7 +53,8 @@ const goCategory = (id) => router.push({ name: 'blog-category', params: { id: St
         </nav>
         <div class="tools">
           <SearchBox />
-          <router-link to="/login" class="login">作者登录</router-link>
+          <router-link v-if="auth.user" to="/admin" class="login">{{ auth.user.username }} · 进入后台</router-link>
+          <router-link v-else to="/login" class="login">作者登录</router-link>
         </div>
       </div>
     </header>
