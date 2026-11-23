@@ -6,7 +6,9 @@
 >
 > `doc/context/project-overview.md` **不再是规则的真源**：它降为背景与取舍记录，保留需求来源、被否决的方案与"为什么这么定"的论证。本文只在引用**论证过程**时才指向它；出现取值冲突一律以 SRS 为准。
 >
-> **2026-11-23 按 SRS v2.6 更新**：授权由"一个 `AuthzInterceptor`"改为"`@RequiresPermission` 权限切面（Spring AOP）+ 归属拦截器 + 状态机"，Spring Security 仍只做认证；新增 `@OperationLog` 操作日志切面、RBAC 三表与 `sys_operation_log`（16 张表）、逻辑删除、批量逐条事务、媒体下载。改动处标"v2.6"。
+> **2026-11-23 按 SRS v2.6 更新**：授权由"一个 `AuthzInterceptor`"改为"`@RequiresPermission` 权限切面（Spring AOP）+ 归属拦截器 + 状态机"，认证不归授权管；新增 `@OperationLog` 操作日志切面、RBAC 三表与 `sys_operation_log`（16 张表）、逻辑删除、批量逐条事务、媒体下载。改动处标"v2.6"。
+>
+> **2026-11-23 技术栈修订（决策 T1～T9）**：不使用 Spring Boot 与 Spring Security。后端为 Spring 6.2 + Spring MVC + MyBatis-Plus，`web.xml` + Java 配置类装配、单一 Spring 容器，WAR 部署到 Tomcat 10.1；认证与 CSRF 改由 Spring MVC 拦截器实现（§5.1），密码哈希只引用 `spring-security-crypto`；Flyway 以 Spring Bean 在启动时迁移（§2.10）。改动处标"v2.6 修订"。
 >
 > 本文的每一条决策若发生变更，必须同步 `doc/context/progress-tracker.md`。追溯脚本 `doc/design/traceability-check.py` 已按用户要求**暂停使用**，不再是改动后的强制关卡。
 
@@ -14,7 +16,7 @@
 
 ## 1. 架构总览
 
-一句话：**一个前后端分离的单体应用**。Vue 3 SPA 通过 REST 调用 Spring Boot；后端是唯一的写入者；MySQL 存结构化数据，本地磁盘存文件。没有缓存层，没有消息队列，没有独立检索服务，没有第二个服务进程。
+一句话：**一个前后端分离的单体应用**。Vue 3 SPA 通过 REST 调用部署在 Tomcat 上的 Spring MVC 后端（WAR）；后端是唯一的写入者；MySQL 存结构化数据，本地磁盘存文件。没有缓存层，没有消息队列，没有独立检索服务，没有第二个服务进程。
 
 **系统架构图（v2.6，报告用图的源）：**
 
@@ -23,10 +25,10 @@ flowchart TB
     Browser["浏览器 · Vue 3 SPA<br/>（后台 /admin + 公开站）"]
     Nginx["Nginx<br/>静态资源 + 反向代理 /api/**"]
     Browser -- "HTTPS 同源<br/>Session Cookie + X-XSRF-TOKEN" --> Nginx
-    subgraph Boot["Spring Boot 3 单体（Spring MVC）"]
+    subgraph App["Spring 6 + Spring MVC 单体（WAR · Tomcat 10.1）"]
         direction TB
-        Sec["Spring Security 过滤器链<br/>认证 401 · CSRF 403 · 会话"]
-        DS["DispatcherServlet"]
+        DS["DispatcherServlet<br/>（web.xml，单一容器）"]
+        Sec["HandlerInterceptor<br/>AuthInterceptor 401 · CsrfInterceptor 403"]
         Bind["ArticleScopeBinder<br/>（按 article:read:all 设 scope）"]
         Log["@OperationLog 切面 · @Order(1)<br/>（H，最外层）"]
         Perm["@RequiresPermission 切面 · @Order(2)<br/>权限闸 404（B）"]
@@ -35,10 +37,10 @@ flowchart TB
         MP["MyBatis-Plus 插件链<br/>归属 InnerInterceptor · 分页 · 乐观锁 · 防全表"]
         Mapper["Mapper / XML"]
         Task["@Scheduled 任务<br/>到期发布 · 未关联清理 · 删文件重试"]
-        Sec --> DS --> Bind --> Log --> Perm --> Ctl --> Svc --> MP --> Mapper
+        DS --> Sec --> Bind --> Log --> Perm --> Ctl --> Svc --> MP --> Mapper
         Task --> Svc
     end
-    Nginx --> Sec
+    Nginx --> DS
     Mapper --> DB[("MySQL 8<br/>16 张表 · Flyway")]
     Svc --> Disk[("本地磁盘 storage/<br/>StorageService")]
     Log -. "@Async + REQUIRES_NEW" .-> DB
@@ -50,9 +52,10 @@ flowchart TB
    ▼
 Nginx ──── 静态资源：前端打包产物
    │
-   └── 反向代理 /api/** ──▶ Spring Boot (单体，单实例)
+   └── 反向代理 /api/** ──▶ Tomcat 10.1 · Spring MVC WAR (单体，单实例)
                                 │
-                                ├─ Spring Security 过滤器链 ── 只做认证、会话、CSRF
+                                ├─ DispatcherServlet ────────── 唯一的 Spring 容器
+                                ├─ AuthInterceptor / CsrfInterceptor ── 只做认证、会话、CSRF（v2.6 修订）
                                 ├─ ArticleScopeBinder ──────── 设置归属 scope
                                 ├─ @OperationLog 切面 ───────── 记录后台写操作（v2.6）
                                 ├─ @RequiresPermission 切面 ─── 权限闸（v2.6，替代 AuthzInterceptor）
@@ -87,22 +90,22 @@ Nginx ──── 静态资源：前端打包产物
 | 前端 HTTP | Axios | 统一携带 Cookie 与 CSRF 头、统一错误处理与 404 归一 |
 | Markdown 编辑 | `md-editor-v3` [建议] | 正文写作与编辑器内预览、图片上传钩子 |
 | 语言 / 运行时 | Java 21 (LTS) | 后端语言；需要时可用虚拟线程 |
-| 后端框架 | Spring Boot 3.x（**Spring MVC**） | REST 接口、事务、依赖注入、配置 |
-| 认证 | Spring Security 6（**仅认证**） | 会话、httpOnly Cookie、CSRF、BCrypt、会话固定防护 |
+| 后端框架 | Spring Framework 6.2（**Spring MVC**，不用 Spring Boot） | REST 接口、事务、依赖注入；`web.xml` + Java 配置类手工装配（§2.10） |
+| 认证（v2.6 修订） | Spring MVC `HandlerInterceptor`（**不用 Spring Security**）+ `spring-security-crypto`（只用 BCrypt） | 会话、httpOnly Cookie、CSRF 令牌、会话固定防护（§5.1） |
 | 授权（v2.6） | **Spring AOP**：自定义注解 `@RequiresPermission` + `PermissionAspect`（`@Around`） | 权限闸（按权限点）；归属闸在拦截器与 Repository、状态闸在状态机（§5.2） |
 | 操作日志（v2.6） | **Spring AOP**：`@OperationLog` + `OperationLogAspect`，`@Async` + `REQUIRES_NEW` 写入 | 后台写操作与登录登出的运维日志（SRS §6.7） |
 | 持久化 | MyBatis-Plus | ORM、分页、乐观锁 `@Version`、逻辑删除 `@TableLogic`、自动填充 `MetaObjectHandler`、防全表更新、行级归属拦截器 |
 | 数据库 | MySQL 8 | 结构化数据的唯一事实来源；需要窗口函数 |
-| Schema 迁移 | Flyway | 版本化 DDL/DCL，含角色与权限点种子、初始管理员与表级授权 |
+| Schema 迁移 | Flyway（Spring Bean，启动时迁移，§2.10） | 版本化 DDL/DCL，含角色与权限点种子、初始管理员与表级授权 |
 | 文件存储 | 本地磁盘 + `StorageService` 抽象 | 封面图、正文图片、文章音频 |
 | 定时任务 | Spring `@Scheduled` | 到期自动发布、孤儿文件兜底清理 |
-| 测试 | JUnit 5 + Spring Boot Test + MockMvc + **Testcontainers** [建议] | 接口级越权用例，跑真实 MySQL |
+| 测试 | JUnit 5 + Spring TestContext（`@SpringJUnitWebConfig`）+ MockMvc + **Testcontainers** [建议] | 接口级越权用例，跑真实 MySQL |
 | 构建 | Maven（单模块） | `pom.xml` 目前为空，依赖待补 |
-| 部署 | 前端静态产物 + 后端 jar，置于 **Nginx** 之后 [建议] | 反向代理、同源 Cookie |
+| 部署 | 前端静态产物 + 后端 **WAR**（外部 Tomcat 10.1），置于 **Nginx** 之后 | 反向代理、同源 Cookie |
 
-> **技术栈表述待任课老师确认（决策 D12）**：报告与 SRS 统一写"Spring Boot 3（Spring MVC）+ MyBatis-Plus，基于实验二 SSM 升级"。实验二用的是 SSM（XML 配置、`CommonsMultipartResolver`、`ResponseEntity<byte[]>` 下载）；本项目对应为 Boot 自动配置、`StandardServletMultipartResolver`、`Resource` 流式下载与 `ContentDisposition`（§5.4）。
+> **技术栈表述（决策 D12、T1～T9；任课老师确认尚待完成）**：报告与 SRS 统一写"Spring 6 + Spring MVC + MyBatis-Plus（不用 Spring Boot、Spring Security），基于实验二 SSM 升级"。实验二用的是 SSM（XML 配置、`CommonsMultipartResolver`、`ResponseEntity<byte[]>` 下载）；本项目保留"手工装配 Spring"的做法，改用 `web.xml` + Java 配置类、`StandardServletMultipartResolver`（`CommonsMultipartResolver` 已在 Spring 6 移除）、`Resource` 流式下载与 `ContentDisposition`（§5.4）。
 >
-> 具体版本号（Spring Boot / Vue / Element Plus / MyBatis-Plus）在实现开始前统一定版并写入 `pom.xml` 与 `package.json`。本文只锁定技术选型，不锁定补丁版本。
+> 具体版本号（Spring Framework / Vue / Element Plus / MyBatis-Plus / Flyway）在实现开始前统一定版并写入 `pom.xml` 与 `package.json`。本文只锁定技术选型，不锁定补丁版本。
 
 ### 2.2 后端为什么是 Spring MVC，而不是 WebFlux
 
@@ -193,6 +196,23 @@ Quartz 的持久化调度（或任何"发布任务表"方案）会引入一个�
 
 视频一律以 `https` URL 的形式出现在正文里，后端只做协议校验（BR-MEDIA-006），不判断链接目标的内容。
 
+### 2.10 不用 Spring Boot、Spring Security 时怎么装配（v2.6 修订，决策 T1～T9）
+
+没有 Boot 的自动配置，下面每一项都要由配置类显式声明；这正是本项目在课程里要展示的 Spring 知识点。
+
+| 事项 | 做法 | 负责 |
+|---|---|---|
+| 启动入口 | `src/main/webapp/WEB-INF/web.xml` 声明唯一的 `DispatcherServlet`（`contextClass` = `AnnotationConfigWebApplicationContext`，`contextConfigLocation` = `com.liang.cms.config.AppConfig`，`load-on-startup` = 1），并声明 `CharacterEncodingFilter`（UTF-8）、`<multipart-config>`（单文件 20 MB、单请求 25 MB）与 `<session-config>`（§5.1）。没有 `main` 方法 | A |
+| 容器（T7） | **只用一个 Spring 容器**：全部配置类都由 `DispatcherServlet` 的 WebApplicationContext 装载，**不配 `ContextLoaderListener` 父容器**。理由：本项目只有一个 `DispatcherServlet`，父子容器没有收益；而父子容器最常见的坑——切面、`@Transactional` 或 `@Async` 声明在一个容器、目标 Bean 在另一个容器，于是静默失效——会直接让权限闸与操作日志失效。报告里说明 `ContextLoaderListener` 的作用与本项目不用它的理由 | A |
+| 配置类 | `AppConfig`（`@Configuration` + `@ComponentScan("com.liang.cms")` + `@PropertySource`）汇总：`DataSourceConfig`（HikariCP、`DataSourceTransactionManager`、`@EnableTransactionManagement`）、`MybatisPlusConfig`（`MybatisSqlSessionFactoryBean`、插件链、`MetaObjectHandler`、`@MapperScan`）、`FlywayConfig`、`WebMvcConfig`（`@EnableWebMvc`：拦截器注册、Jackson、校验器、`StandardServletMultipartResolver`）、`AopConfig`（`@EnableAspectJAutoProxy(proxyTargetClass = true)`）、`SchedulingConfig`（`@EnableScheduling`、`@EnableAsync` 与线程池） | A 建骨架，各配置类由归属人补全 |
+| 外部配置 | `src/main/resources/application.properties` 经 `@PropertySource` 读入（数据库连接、`cms.storage.root` 等），口令类取值允许用环境变量覆盖。不用 `application.yml`，那是 Boot 的约定 | A |
+| Flyway（T5） | `FlywayConfig` 定义 `@Bean(initMethod = "migrate") Flyway`，`SqlSessionFactory` 以 `@DependsOn("flyway")` 保证先迁移、后建会话工厂。迁移脚本放 `classpath:db/migration`，由迁移账号（有 DDL 权限）执行；应用账号只持有 §2.5 的 DML 权限。Flyway 10 起 MySQL 支持在单独的 `flyway-mysql` 模块里 | C |
+| 认证与 CSRF（T1、T2） | `AuthInterceptor` + `CsrfInterceptor`（`HandlerInterceptor`，§5.1）；密码哈希只引入 `spring-security-crypto` 的 `BCryptPasswordEncoder`，**不引入** `spring-security-web` / `spring-security-config` | B |
+| JSON 与校验 | `WebMvcConfig.configureMessageConverters` 注册统一的 `ObjectMapper`（`JavaTimeModule`、`snake_case`、时间格式按 api-spec §3）；`LocalValidatorFactoryBean`（Hibernate Validator）作为 MVC 校验器 | H |
+| 全局异常与 404 | `@RestControllerAdvice` 统一返回体；不存在的路径由 `NoHandlerFoundException`（Spring 6.1 起默认抛出）/ `NoResourceFoundException` 转成 `404 40400`；不开默认 Servlet 的静态资源映射 | H |
+| 部署（T4） | Maven `packaging = war`，`jakarta.servlet-api` 为 `provided`；部署到外部 **Tomcat 10.1**（Jakarta EE 10，Spring 6.2 支持）；Nginx 反向代理 `/api/**` 到 Tomcat。开发期用 IDE 的 Tomcat 运行配置 | A |
+| 版本（T6） | Spring Framework 6.2.x + JDK 21；MyBatis-Plus 用非 Boot 依赖（`com.baomidou:mybatis-plus` + `mybatis-spring` 3.x；3.5.9 起分页插件另需 `mybatis-plus-jsqlparser`）；具体补丁版本在 `pom.xml` 定版 | A |
+
 ---
 
 ## 3. 系统边界
@@ -203,9 +223,9 @@ Quartz 的持久化调度（或任何"发布任务表"方案）会引入一个�
 
 ```
 src/main/java/com/liang/cms/
-├── CmsApplication.java
-├── config/          安全配置、MyBatis 配置（插件链、MetaObjectHandler）、调度开关、存储配置
-├── auth/            登录、登出、注册；读取当前用户；把用户身份放进请求上下文
+├── config/          AppConfig 与各配置类（v2.6 修订）：数据源与事务、MyBatis-Plus（插件链、MetaObjectHandler）、
+│                    Flyway、Web MVC（拦截器注册、Jackson、校验、multipart）、AOP、调度与异步、存储
+├── auth/            登录、登出、注册；AuthInterceptor、CsrfInterceptor、CurrentUserHolder（v2.6 修订）
 ├── security/        授权（v2.6）：@RequiresPermission、PermissionAspect、PermissionCoverageChecker、
 │                    PermissionService（每请求加载权限集）、OwnershipGate、
 │                    ArticleScopeBinder、ArticleScopeContext（唯一设置 scope 的地方）
@@ -218,14 +238,19 @@ src/main/java/com/liang/cms/
 ├── task/            后台任务：到期自动发布、孤儿文件清理
 └── common/          统一响应体、全局异常处理、错误码、分页对象、排序白名单解析、枚举
     └── aop/         @OperationLog、OperationLogAspect、OperationLogWriter（v2.6，H）
+
+src/main/webapp/WEB-INF/web.xml   DispatcherServlet、CharacterEncodingFilter、multipart 与会话配置（v2.6 修订）
+src/main/webapp/META-INF/context.xml   Tomcat CookieProcessor：SameSite=Lax
 ```
+
+没有 `CmsApplication.java`：不用 Spring Boot，应用由 Tomcat 加载 `web.xml` 启动（§2.10）。
 
 每个包的职责与**禁止事项**：
 
 | 包 | 负责 | 绝不允许做 |
 |---|---|---|
-| `config/` | 装配框架：注册拦截器、配置 Security 过滤链、定义存储根目录 | 出现业务判断（角色、状态、归属都不在这里判） |
-| `auth/` | 认证本身：校验密码、建立/销毁会话、注册编辑账号 | 判角色能不能做某件事（那是 `security/` 的事） |
+| `config/` | 装配框架：注册拦截器、配置数据源与事务、Flyway、定义存储根目录 | 出现业务判断（角色、状态、归属都不在这里判） |
+| `auth/` | 认证本身：校验密码、建立/销毁会话、注册编辑账号、登录拦截与 CSRF 校验 | 判角色能不能做某件事（那是 `security/` 的事） |
 | `security/` | 授权：权限切面、权限点覆盖检查、归属闸、scope 设置、权限拒绝的统一响应 | 查询文章内容、返回业务数据；在会话里缓存权限集（BR-RBAC-005） |
 | `system/` | 用户管理、角色与权限点只读、操作日志查询 | 修改角色的权限点（本期无此功能，BR-RBAC-002）；删除账号（BR-USER-002） |
 | `article/` | 文章聚合的全部读写、状态机 | 自行拼接文件路径、自行拼 SQL 的归属条件 |
@@ -380,24 +405,29 @@ web/
 
 ## 5. 认证与访问模型
 
-### 5.1 认证（Spring Security，只做认证）
+### 5.1 认证（v2.6 修订：Spring MVC 拦截器，不用 Spring Security）
 
 | 事项 | 做法 |
 |---|---|
-| 会话 | 服务端 `HttpSession`，Cookie 名 `JSESSIONID`，`httpOnly` = true，`SameSite` = Lax，`Path` = /，`Max-Age` 与会话绝对有效期一致，生产环境 `Secure` = true |
-| CSRF | `HttpSessionCsrfTokenRepository`（会话绑定令牌，贴合 SRS §4.1.2）：`GET /api/auth/csrf` 下发令牌，前端回填到 `X-XSRF-TOKEN` 请求头；不依赖可读的 CSRF cookie |
-| 密码 | BCrypt 哈希，强度用框架默认 |
-| 会话固定攻击 | 框架默认在认证成功后更换 session id |
-| 会话有效期 | 空闲 30 分钟无操作失效；绝对有效期 12 小时；到期后请求返回 401，须重新登录（SRS 4.1.2） |
+| 会话 | Servlet 容器的 `HttpSession`，Cookie 名 `JSESSIONID`，`httpOnly` = true，`SameSite` = Lax，`Path` = /，`Max-Age` 与会话绝对有效期一致，生产环境 `Secure` = true。由 `web.xml` 的 `<session-config>`（`session-timeout` = 30、`cookie-config` 的 `http-only` / `secure` / `max-age` = 43200、`tracking-mode` = COOKIE）与 Tomcat `META-INF/context.xml` 的 `Rfc6265CookieProcessor sameSiteCookies="lax"` 配置 |
+| 会话里存什么 | 登录成功后只存 `LOGIN_USER_ID`、`LOGIN_AT` 与 `CSRF_TOKEN`；**不存角色、权限或账号状态**（BR-RBAC-005） |
+| 登录拦截 | `AuthInterceptor`（`HandlerInterceptor.preHandle`，B）：取不到会话或 `LOGIN_USER_ID` → 401；`LOGIN_AT` 距今超过 12 小时 → 销毁会话、401；**每个请求按 `user_id` 查一次 `user` 的 `status` 与 `role_id`**，查不到或为 `DISABLED` → 销毁会话、401（BR-USER-001）。通过后把 `CurrentUser(userId, roleId)` 放进 `CurrentUserHolder`（ThreadLocal，`afterCompletion` 清理），供权限切面、归属 scope 与操作日志使用 |
+| 拦截范围 | `/api/**`。完全匿名：`/api/auth/login`、`/api/auth/register`、`/api/auth/csrf`、`/api/public/**`。**可选认证**：媒体出口 `/api/media/**`（#29、#43）有合法会话时识别身份，没有时按匿名处理，任何情况都不返回 401（§5.4） |
+| CSRF（T2） | `CsrfInterceptor`（排在 `AuthInterceptor` 之后，B）：对 POST / PUT / PATCH / DELETE 且不是 `POST /api/auth/login` 的请求，用 `MessageDigest.isEqual` 比较请求头 `X-XSRF-TOKEN` 与会话属性 `CSRF_TOKEN`，缺失或不等 → 403 `40300`。令牌由 `GET /api/auth/csrf`（#1）用 `SecureRandom` 生成 32 字节、Base64URL 编码后存进会话（无会话时建匿名会话），贴合 SRS §4.1.2 的会话绑定令牌；不下发可读的 CSRF Cookie |
+| 密码（T1） | `spring-security-crypto` 的 `BCryptPasswordEncoder`（强度 10）；只引这一个 jar |
+| 会话固定攻击 | 登录成功后调用 `HttpServletRequest.changeSessionId()` 更换会话标识，并重新生成 `CSRF_TOKEN`，登录前的令牌随之失效（api-spec §2.2） |
+| 会话有效期 | 空闲 30 分钟由容器 `session-timeout` 负责；绝对有效期 12 小时由 `AuthInterceptor` 比较 `LOGIN_AT`；到期后请求返回 401，须重新登录（SRS 4.1.2） |
 | 登录失败限制 | 同一登录名连续失败 5 次锁定 15 分钟；锁定期间即使密码正确也拒绝，响应与普通失败一致（SRS 4.1.2）。计数存 `login_throttle`，不存在的登录名同样计数 |
 | 并发会话 | 同一账号允许多个会话同时存在；登出只销毁当前会话（SRS 4.1.2） |
-| 登录 | `POST /api/auth/login` |
-| 登出 | `POST /api/auth/logout`，会话失效 |
+| 登录 | `POST /api/auth/login`：普通的 `AuthController` 方法，`AuthService` 校验密码、状态与失败计数，失败统一 401 `40101`；标 `@OperationLog`（§5.7） |
+| 登出 | `POST /api/auth/logout`：`session.invalidate()`，并以 `Max-Age=0` 清除 `JSESSIONID` |
 | 注册 | `POST /api/auth/register`，**只创建编辑角色**，注册成功即启用（SRS §4.1.1、FR-USER-001） |
 | 管理员账号 | 不开放注册；初始管理员由 Flyway 迁移创建；其余管理员只能经角色分配产生，至少保留一个启用管理员（SRS BR-ROLE-004/005） |
-| 停用账号（v2.6） | `UserDetailsService` 对 `DISABLED` 账号按普通失败处理（统一 401）；已有会话由每请求加载用户状态时发现并返回 401（BR-USER-001） |
-| 授权 | **不启用** `@PreAuthorize` / `authorizeHttpRequests` 的角色规则，只保留"`/api/**` 除白名单外需已认证"；授权全部交给 §5.2 的权限切面，避免两套授权并存（决策 D2） |
+| 停用账号（v2.6） | 登录时 `DISABLED` 账号按普通失败处理（统一 401）；已有会话由 `AuthInterceptor` 每请求查状态发现并返回 401（BR-USER-001） |
+| 授权 | 拦截器只判"是否已登录"，**不做任何角色或权限判断**；授权全部交给 §5.2 的权限切面，避免两套授权并存（决策 D2） |
 | 未认证访问后台接口 | **401** |
+| 拦截器顺序 | `WebMvcConfig.addInterceptors` 依次注册 `AuthInterceptor` → `CsrfInterceptor` → `ArticleScopeBinder`。三者都在参数绑定之前执行，所以 401、403 一定先于请求体校验的 400 |
+| 不存在的路径 | 没有匹配的 Handler 时拦截器不执行，直接由全局异常处理返回 `404 40400`（H），未登录也是 404 而不是 401（api-spec §3.3） |
 
 > **关于 CSRF 令牌。** 会话凭据 `JSESSIONID` 保持 httpOnly；CSRF 令牌存于服务端会话并通过 `#1` 接口下发，前端只把它放进请求头，不作为第二份凭据持久化在可读 cookie 里。单独的 CSRF 令牌泄露不构成攻击，攻击者必须同时持有会话 cookie。
 >
@@ -421,9 +451,9 @@ web/
 
 ```mermaid
 flowchart LR
-    R["请求 /api/**"] --> A{"已认证？<br/>（Security）"}
+    R["请求 /api/**"] --> A{"已认证？<br/>（AuthInterceptor）"}
     A -- 否 --> E401["401"]
-    A -- 是 --> C{"CSRF 令牌有效？<br/>（改变状态的请求）"}
+    A -- 是 --> C{"CSRF 令牌有效？<br/>（CsrfInterceptor，改变状态的请求）"}
     C -- 否 --> E403["403"]
     C -- 是 --> L["@OperationLog 切面开始计时"]
     L --> P{"角色持有<br/>@RequiresPermission 的权限点？"}
@@ -442,10 +472,10 @@ flowchart LR
 **v2.6 为什么改成切面**（推翻 v2.5"三道闸门全部实现在一个 `AuthzInterceptor`"）：课程评分表点名要求"基于 Spring AOP 的接口权限校验"；而权限点必须声明在具体的 Controller 方法上，注解 + 切面正是 Spring 的惯用写法。为了保住原来"权限判断只有一处可证明"的根基，改为三条结构保证：
 
 1. **判定点仍只有一个**：`PermissionAspect` 是全代码库唯一读取权限集并做比较的地方；Service 里不出现角色或权限判断（源码扫描测试断言 `hasPermission` 只在 `security/` 被调用）。
-2. **漏声明启动即失败**（BR-RBAC-003）：`PermissionCoverageChecker`（`ApplicationRunner`）启动时扫描全部 `@RequestMapping`，`/api/**` 下除白名单（登录、注册、CSRF 令牌、登出、当前用户、`/api/public/**`、媒体出口 #29 与下载 #43）外，缺 `@RequiresPermission` 的方法直接抛异常、应用起不来。
-3. **权限集每请求从库加载**（BR-RBAC-005）：`role_permission JOIN permission` 一条 SQL（N+1 落点），不缓存在会话里，所以角色分配、停用在下一次请求生效。
+2. **漏声明启动即失败**（BR-RBAC-003）：`PermissionCoverageChecker`（v2.6 修订：监听 `ContextRefreshedEvent`，不再是 Boot 的 `ApplicationRunner`）启动时从 `RequestMappingHandlerMapping` 取全部映射，`/api/**` 下除白名单（登录、注册、CSRF 令牌、登出、当前用户、`/api/public/**`、媒体出口 #29 与下载 #43）外，缺 `@RequiresPermission` 的方法直接抛异常、应用部署失败；同时断言声明了 `@RequiresPermission` 的 Controller Bean 是 AOP 代理（`AopUtils.isAopProxy`），防止 `@EnableAspectJAutoProxy` 漏配导致切面静默失效。
+3. **权限集每请求从库加载**（BR-RBAC-005）：用 `AuthInterceptor` 本次请求按 `user_id` 查到的 `role_id`，`role_permission JOIN permission` 一条 SQL（N+1 落点）；角色和权限都不缓存在会话里，所以角色分配、停用在下一次请求生效。
 
-**切面顺序**：`OperationLogAspect` `@Order(1)` 在最外层、`PermissionAspect` `@Order(2)` 在内，权限失败也能留下一条失败日志。`@Transactional` 代理在两者之内（Service 层），所以日志不在业务事务里。
+**切面顺序**：认证与 CSRF 在拦截器里、早于两个切面；`OperationLogAspect` `@Order(1)` 在最外层、`PermissionAspect` `@Order(2)` 在内，权限失败也能留下一条失败日志。`@Transactional` 代理在两者之内（Service 层），所以日志不在业务事务里。
 
 **与请求体校验的先后（待 A、B 在 M1 前确认，api-spec §16-#17）**：切面包在 Controller 代理上，而 Spring MVC 在调用代理**之前**就完成参数绑定、JSON 解析和 `@Valid`，所以请求体格式错误的 400 会先于权限闸 / 归属闸的 404。格式校验与资源是否存在无关，不泄露存在性；暂定接受这个顺序，越权用例一律用格式合法的请求体。v2.5 的 `HandlerInterceptor.preHandle` 在参数解析之前执行，没有这个差别。
 
@@ -510,9 +540,9 @@ BR-ISO-003 要求隔离"在数据层强制执行，漏一处即漏洞"。落地�
 
 | 环节 | 实验二（SSM） | 本项目 |
 |---|---|---|
-| 接收 | `CommonsMultipartResolver`（XML 配置） | Boot 自动配置的 `StandardServletMultipartResolver`；`spring.servlet.multipart.max-file-size` / `max-request-size` 限大小 |
+| 接收 | `CommonsMultipartResolver`（XML 配置） | `WebMvcConfig` 声明 `StandardServletMultipartResolver` Bean（`CommonsMultipartResolver` 已在 Spring 6 移除）；大小上限写在 `web.xml` 的 `<multipart-config>`（`max-file-size` / `max-request-size`），按用途的细分上限由 `media/` 校验 |
 | 校验 | 扩展名 | 魔数判真实格式 + 白名单字典 `media_format` + 用途匹配 |
-| 存储 | 直接写目录 | `StorageService` 接口，本地磁盘实现（可 `@ConditionalOnProperty` 换实现） |
+| 存储 | 直接写目录 | `StorageService` 接口，本地磁盘实现（可用 `@Profile` 换实现） |
 | 下载 | `ResponseEntity<byte[]>` 整读 | `ResponseEntity<Resource>` 流式；`ContentDisposition.attachment().filename(originalName, UTF_8)`（RFC 5987）；在线访问用 `inline` + `ResourceRegion` 支持 Range |
 | 判权 | 无 | 与文章状态绑定，任何拒绝 404 |
 
@@ -554,7 +584,8 @@ WHERE t.rn = 1
 - 注解：`@OperationLog(module = "ARTICLE", operation = "ARTICLE_DELETE", targetType = "ARTICLE", targetId = "#id")`，`targetId` 用 SpEL 从方法参数取值；批量操作不填 `targetId`。
 - 切面：`OperationLogAspect`（`@Around`，`@Order(1)`）记录开始时间，`finally` 里组装记录（操作人、方法与路径、客户端 IP、成功与否、错误码、耗时），交给 `OperationLogWriter`。
 - 写入：`OperationLogWriter.write` 标 `@Async` + `@Transactional(propagation = REQUIRES_NEW)`，在独立线程、独立事务里 INSERT；失败只写应用日志，不影响业务（BR-OPLOG-004）。
-- 登录成功、失败、登出不经过 Controller 切面（在 Security 过滤链里），由 `AuthenticationSuccessHandler` / `FailureHandler` / `LogoutSuccessHandler` 调用同一个 `OperationLogWriter`。登录失败不记尝试的登录名（BR-OPLOG-003）。
+- 登录、登出（v2.6 修订）：不再有 Security 过滤链，两者都是普通的 `AuthController` 方法，和其他写接口一样标 `@OperationLog`。登录失败由 `AuthService` 抛业务异常，切面在 `finally` 里照常记一条失败记录；登录成功的操作人取方法返回的 `user_id`；登出的操作人在方法执行前（会话销毁前）取得。登录失败不记尝试的登录名（BR-OPLOG-003）。
+- 在拦截器阶段就被拒绝的请求（401、403 `CSRF_INVALID`）、参数绑定或请求体格式失败的 400、不存在的路径不进入切面，因此不记录（SRS BR-OPLOG-001 的例外）。
 - 不记请求体、不记密码；读操作（GET）不记。
 - 与 `audit_log` 的分工见 SRS §6.7：留痕与业务同事务、失败则业务回滚；操作日志相反。两张表不合并（决策 D8）。
 
@@ -571,7 +602,7 @@ WHERE t.rn = 1
 
 ### 6.1 到期自动发布（迁移路径 #10）
 
-**调度：** `@Scheduled(fixedDelayString = "${cms.publish.scan-interval:30s}")`，扫描间隔可配置。按**单实例**部署，不引入分布式锁。
+**调度：** `@Scheduled(fixedDelayString = "${cms.publish.scan-interval:30s}")`，扫描间隔可配置（v2.6 修订：没有 Boot，占位符要靠 `@PropertySource` + `PropertySourcesPlaceholderConfigurer` Bean 解析，`@EnableScheduling` 也要显式声明，见 §2.10）。按**单实例**部署，不引入分布式锁。
 
 **幂等性靠状态门闩 + 本周期留痕，不靠调度器，也不靠 `published_at IS NULL`。** 每篇文章的发布是一条带完整条件的 UPDATE：
 
@@ -733,6 +764,7 @@ WHERE id = #{id}
 | 不建发布任务表、用 `@Scheduled` | 避免第二处任务状态来源 |
 | 发布 UPDATE 以 `status='SCHEDULED'` 为门闩，同周期靠无发布留痕防重复（不使用 `published_at IS NULL`） | BR-PUB-006、SRS §5.5、§5.2 #10 |
 | 越权测试跑 Testcontainers 真 MySQL | SRS §9.1 第 2 / 3 条需要可信的自动化用例 |
+| 不用 Spring Boot、Spring Security：`web.xml` + Java 配置、单一容器、WAR 部署 Tomcat 10.1；认证、CSRF 用拦截器，BCrypt 用 `spring-security-crypto`；Flyway 作为 Spring Bean | 决策 T1～T9（2026-11-23）；技术栈表述待老师确认 |
 | ~~三道闸门集中在一个拦截器~~ → v2.6：权限闸为 `@RequiresPermission` 切面，归属闸、状态闸不变；判定点唯一 + 启动覆盖检查 | SRS §4.4、BR-RBAC-003、课程评分表"基于 Spring AOP 的接口权限校验" |
 | 建角色、权限点表，但用户只有一个 `role_id`（不建多对多） | BR-ROLE-001、BR-RBAC-001（决策 D1） |
 | 角色权限运行时只读 | BR-RBAC-002（决策 D5），保住 §4.5 矩阵不变量 |
@@ -770,7 +802,7 @@ WHERE id = #{id}
 
 ### 9.3 实现开始前要定的小事
 
-- Spring Boot / Vue 3 / Element Plus / MyBatis-Plus / Testcontainers 的具体版本号，写入 `pom.xml` 与 `package.json`
+- Spring Framework 6.2.x / Tomcat 10.1.x / Vue 3 / Element Plus / MyBatis-Plus / Flyway / Testcontainers 的具体版本号，写入 `pom.xml` 与 `package.json`
 - Markdown 编辑器选型，当前 [建议] `md-editor-v3`
 - 部署形态确认：Nginx 同源反向代理（本架构假设如此，因为 Cookie 的 `SameSite=Lax` 依赖同源）
 - `cms.storage.root` 的默认值与 `.gitignore` 条目
