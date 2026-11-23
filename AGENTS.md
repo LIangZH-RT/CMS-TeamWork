@@ -34,10 +34,10 @@
 ## 3 技术栈（已锁定选型，版本号待定）
 
 - **前端**：Vue 3（Composition API）+ Vite、Element Plus、Pinia、Vue Router、Axios；Markdown 编辑建议 `md-editor-v3`。
-- **后端**：Java 21（JDK 版本待 B 定版，见 tracker Open Q11）、Spring Boot 3.x（**Spring MVC**，不用 WebFlux）、Spring Security 6（**只做认证 / 会话 / CSRF**）、Spring AOP（权限切面、操作日志切面）、MyBatis-Plus（不用 JPA）、MySQL 8（`utf8mb4`）、Flyway、Spring `@Scheduled`。课程报告里写作「Spring Boot 3（Spring MVC）+ MyBatis-Plus，基于实验二 SSM 升级」（D12，待老师确认）。
-- **测试**：JUnit 5、Spring Boot Test、MockMvc、Testcontainers（**真 MySQL，不用 H2**）。**2026-11-23 起后端测试暂缓到 M5**（`team-division.md` §3.7），选型不变。
-- **构建与部署**：Maven 单模块；前端静态产物 + 后端 jar，置于 Nginx 同源反向代理之后。
-- **明确不引入**：Redis 或任何缓存、消息队列、Quartz、JWT、独立检索服务。要引入任何新依赖或新中间件，先问人。
+- **后端**：Java 21（决策 T6）、Spring Framework 6.2 + **Spring MVC**（**不用 Spring Boot**，不用 WebFlux；`web.xml` + Java 配置类、单一 `DispatcherServlet` 容器，见 `architecture.md` §2.10）、认证与 CSRF 用 Spring MVC `HandlerInterceptor`（**不用 Spring Security**，密码哈希只用 `spring-security-crypto` 的 BCrypt，`architecture.md` §5.1）、Spring AOP（权限切面、操作日志切面）、MyBatis-Plus（非 Boot 依赖，不用 JPA）、MySQL 8（`utf8mb4`）、Flyway（Spring Bean 启动时迁移）、Spring `@Scheduled`。课程报告里写作「Spring 6 + Spring MVC + MyBatis-Plus，基于实验二 SSM 升级」（D12、T1～T9，待老师确认）。
+- **测试**：JUnit 5、Spring TestContext（`spring-test`）、MockMvc、Testcontainers（**真 MySQL，不用 H2**）。**2026-11-23 起后端测试暂缓到 M5**（`team-division.md` §3.7），选型不变。
+- **构建与部署**：Maven 单模块，`packaging = war`；后端 WAR 部署到外部 Tomcat 10.1，前端静态产物与 `/api/**` 反向代理都在 Nginx 同源之后。
+- **明确不引入**：Spring Boot（任何 `spring-boot-*` 依赖）、Spring Security 框架（`spring-security-web` / `spring-security-config`；只允许 `spring-security-crypto`）、Redis 或任何缓存、消息队列、Quartz、JWT、独立检索服务。要引入任何新依赖或新中间件，先问人。
 
 ## 4 代码结构约定
 
@@ -48,7 +48,7 @@
 
 数据库：
 - 表、字段、约束以 `doc/db/schema.md` 为准；迁移按其 §8 的 V1～V11 顺序，每张表只由所有者改（`team-division.md` §1.3）。
-- `user`、`category`、`tag`、`article` 只做**逻辑删除**（`@TableLogic`，`deleted` 为 0 或行 id），应用账号没有它们的 `DELETE` 权限；手写 XML 要自己加 `deleted = 0`。
+- `category`、`tag`、`article` 只做**逻辑删除**（`@TableLogic`，`deleted` 为 0 或行 id，实体字段声明为 `Long`）；`user` **没有 `deleted` 列、不可删除**，只能停用（BR-USER-002），不要给 `User` 加 `@TableLogic`。这四张表应用账号都没有 `DELETE` 权限。手写 XML 要自己加 `deleted = 0`；唯一例外是 BR-ROLE-005 的作者判定，要包含已删除文章（schema USER-03）。
 - 枚举在库里与接口里是**同一套英文代码**，用 MyBatis-Plus `@EnumValue` 直接映射，不做中英映射。
 - schema §6 列出的服务层规则（AUD-01～08、USER-01、TAX-01、MEDIA-01～03、ART-01）数据库不会替你挡，必须在对应 Service 里校验。
 
@@ -60,24 +60,24 @@
 
 写代码前逐条对照；违反任意一条都视为缺陷，即使测试是绿的。
 
-1. **状态只能走状态机**：`article.status` 只有 `ArticleStateMachine.transition(...)` 一个写入口；不存在 `setStatus`，不存在接收 `status` 的 DTO。进入「已发布」的唯一路径是审核通过（INV-01）。
+1. **状态只能走状态机**：`article.status` 只有 `ArticleStateMachine.transition(...)` 一个写入口；不存在 `setStatus`，不存在接收**文章** `status` 的 DTO。进入「已发布」的唯一路径是审核通过（INV-01）。
 2. **归属隔离在数据层**：文章读查询的归属条件由 MyBatis-Plus 拦截器追加，scope 只能由 `ArticleScopeBinder` 设置；写路径只经 `ArticleRepository` 的固定方法（INV-02）。
 3. **管理员不能改内容**：审核相关接口的 DTO 里根本没有内容字段（INV-03）。
 4. **留痕只增**：`audit/` 包里不写 update / delete 方法；应用数据库账号只有 `INSERT`/`SELECT`（INV-04）。
-5. **媒体单一出口**：所有文件只经 `GET /api/media/{media_id}` 判权后由应用读盘返回；`storage/` 不得出现在任何静态资源映射里（INV-05）。
+5. **媒体单一出口**：所有文件只经 `GET /api/media/{media_id}`（#29）与 `/download`（#43）共用的同一个 `MediaAccessPolicy` 判权后由应用读盘返回；`storage/` 不得出现在任何静态资源映射里（INV-05）。
 6. **正文只存 Markdown 原文**：后端不渲染、不消毒、不接受 HTML / 脚本 / iframe；视频只存 `https` URL（INV-06）。
-7. **系统字段只由系统写**：`published_at`、`author_id`、`status`、`version`、时间戳不出现在任何请求 DTO 里；请求带了直接 400（INV-07、INV-08）。编辑文章用 `expected_version` 做乐观锁，不一致返回 `409 40907`。
+7. **文章的系统字段只由系统写**：文章的 `published_at`、`author_id`、`status`、`version`、时间戳不出现在文章写接口（#7、#9）的请求 DTO 里；请求带了直接 400（INV-07、INV-08）。这条只针对文章：#34 账号启停、#38 分类启停的请求体本来就是 `status`，不要被全局规则误拒（api-spec §1.2）。编辑文章用 `expected_version` 做乐观锁，不一致返回 `409 40907`。
 8. **拒绝不泄露存在性**：权限闸、归属闸失败返回 404，响应体与「资源不存在」逐字节一致；媒体出口任何拒绝都是 404；401 只用于未登录（INV-09）。具体判定顺序与错误码见 `api-spec.md` §3。
 9. **公开接口只读且只给已发布**：`publicapi/` 只有 SELECT，不接受任何影响可见性的参数（INV-10）。
 10. **不加缓存**：任何缓存都会破坏「下架后媒体立即不可访问」（BR-MEDIA-003）。
-11. **权限只在切面判**：每个 Controller 方法都有 `@RequiresPermission` 或在白名单里（启动检查，BR-RBAC-003）；Service 里不判断角色，不用 `@PreAuthorize`。写接口加 `@OperationLog`，不直接写 `sys_operation_log`；文章业务留痕仍走 `AuditWriter`。
+11. **权限只在切面判**：每个 Controller 方法都有 `@RequiresPermission` 或在白名单里（启动检查，BR-RBAC-003）；Service 里不判断角色；拦截器只判是否已登录，不判权限。写接口加 `@OperationLog`，不直接写 `sys_operation_log`；文章业务留痕仍走 `AuditWriter`。
 12. **批量逐条独立事务**：#40～#42 每条一个事务（`TransactionTemplate` 或另一个 Bean 上的 `REQUIRES_NEW`），不要同类自调用。
 
 ## 6 接口约定速查
 
 完整内容见 `doc/api/api-spec.md`，这里只列最常用的：
 - 前缀 `/api`；匿名入口 `/api/auth/{csrf,register,login}`、`/api/public/**`、`/api/media/{id}`、`/api/media/{id}/download`。
-- 认证：服务端会话 Cookie（`JSESSIONID`，HttpOnly）+ 除登录外的写请求带 `X-XSRF-TOKEN` 请求头。
+- 认证：服务端会话 Cookie（`JSESSIONID`，HttpOnly）+ 除登录外的写请求带 `X-XSRF-TOKEN` 请求头；由 `AuthInterceptor`（401）与 `CsrfInterceptor`（403）校验，会话里只存 `user_id`，状态与角色每请求查库。
 - 响应体统一 `{code, message, data}`；HTTP 状态码按 SRS 使用 400 / 401 / 403 / 404 / 409。
 - 字段 snake_case；时间 ISO 8601 且带时区偏移；分页参数 `page`、`page_size`，返回 `{items, page, page_size, total}`。
 - 状态迁移用动作接口 `POST /api/articles/{id}/<动作>`，审核通过 / 驳回必须带 `submission_id`。
@@ -109,3 +109,4 @@
 - 不要为了让测试通过而放宽权限判定、吞掉异常或改成 200。
 - 不要在前端做任何「安全」判断后就认为权限完成了。
 - 不要绕过 Flyway 手动改库表结构。
+- 不要引入 Spring Boot 或 Spring Security 框架依赖，也不要写 `@SpringBootApplication`、`application.yml`、`SecurityFilterChain`；本项目是手工装配的 Spring MVC（`architecture.md` §2.10）。
