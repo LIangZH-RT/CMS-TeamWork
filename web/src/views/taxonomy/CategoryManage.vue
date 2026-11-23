@@ -3,7 +3,7 @@
 // 校验策略：长度/空白前端只做最小防御（去首尾空白、非空），真正的重名/引用校验让后端返回 409。
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
-import { listCategories, createCategory, renameCategory, deleteCategory } from '@/api/admin'
+import { listCategories, createCategory, renameCategory, deleteCategory } from '@/api/taxonomy'
 
 const loading = ref(false)
 const rows = ref([])

@@ -4,7 +4,7 @@
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { getAuditLogs } from '@/api/admin'
+import { getAuditLogs } from '@/api/audit'
 import { fmtDateTime } from '@/utils/format'
 import { AUDIT_ACTION_LABEL, REJECT_CATEGORY_LABEL } from '@/utils/status'
 

@@ -4,7 +4,8 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { getReviewQueue, getArticleCounts } from '@/api/admin'
+import { getReviewQueue } from '@/api/review'
+import { getArticleCounts } from '@/api/article'
 import { fmtDateTime } from '@/utils/format'
 
 const router = useRouter()
