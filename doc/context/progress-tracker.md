@@ -18,7 +18,7 @@
 
 ## Current Goal
 
-按 `doc/context/team-division.md` 进入后端 M0：B 搭纯 Spring MVC 工程骨架（`web.xml` + Java 配置、WAR、Flyway Bean、登录与 CSRF 拦截器骨架，architecture §2.10）、H 写 `common/`（含 Jackson、校验器与 404 映射）、各表所有者按 `doc/db/schema.md` 写 V1～V11。本阶段不安排测试。v2.6 新增章节由 A 用自己的话改写定稿（`doc/ai-log/README.md`）。
+按 `doc/context/team-division.md` 进入后端 M0：B 先在 2 天内合入最小骨架（WAR 在 Tomcat 10.1 启动、`DataSource` 连通、Flyway Bean 迁移、`GET /api/health`，architecture §2.10），之后其他人并行开工，登录与 CSRF 拦截器、两个切面和归属 scope（F）放到 M1；H 写 `common/`（含 Jackson、校验器与 404 映射）、各表所有者按 `doc/db/schema.md` 写 V1～V11。本阶段不安排测试。v2.6 新增章节由 A 用自己的话改写定稿（`doc/ai-log/README.md`）。
 
 ## Completed
 

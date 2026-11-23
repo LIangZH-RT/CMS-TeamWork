@@ -287,7 +287,9 @@
 
 ### 2.4 共享骨架的归属与顺序（M0）
 
-1. **B**：`pom.xml` 定版（`packaging = war`；Spring Framework 6.2、MyBatis-Plus 非 Boot 依赖、Flyway、MySQL 驱动、HikariCP、`spring-security-crypto`；**不引入任何 `spring-boot-*` 与 `spring-security-web` / `-config`**；版本号见 arch §9.3）、包根 `com.liang.cms` 和 arch §3.1 的空包、`web.xml` 与 `AppConfig` 及各配置类骨架（arch §2.10）、`application.properties`（`cms.storage.root`、`cms.publish.scan-interval`）、Flyway Bean、迁移账号和应用账号分离、拦截器骨架（`AuthInterceptor` 401、`CsrfInterceptor` 403）、Tomcat 10.1 本地运行说明。
+> **M0 最小骨架两天内合入（2026-11-23 定）**：B 的第一个 PR 只做最小可运行骨架，**开工后 2 天内合入 `main`**，验收四条：① WAR 能在 Tomcat 10.1 上启动；② `DataSource` 能连上 MySQL；③ Flyway Bean 在启动时执行迁移（至少跑通 `V1`）；④ 有一个健康检查接口 `GET /api/health` 返回 200。合入后其他人立即在这套骨架上并行开工（各表迁移、`common/`、各自模块）；`AuthInterceptor`、`CsrfInterceptor`、权限切面、操作日志切面和归属 scope 都放到 M1，不卡 M0。`/api/health` 只是 M0 冒烟用，不计入 44 个接口；进入 M1 前由 B 删除，或由 A 在 api-spec 登记后加进认证与权限覆盖检查的白名单。
+
+1. **B**：`pom.xml` 定版（`packaging = war`；Spring Framework 6.2、MyBatis-Plus 非 Boot 依赖、Flyway、MySQL 驱动、HikariCP、`spring-security-crypto`；**不引入任何 `spring-boot-*` 与 `spring-security-web` / `-config`**；版本号见 arch §9.3）、包根 `com.liang.cms` 和 arch §3.1 的空包、`web.xml` 与 `AppConfig` 及各配置类骨架（arch §2.10）、`application.properties`（`cms.storage.root`、`cms.publish.scan-interval`）、Flyway Bean、迁移账号和应用账号分离、`GET /api/health`、Tomcat 10.1 本地运行说明。**这一步就是上面的最小骨架，2 天内合入**；拦截器（`AuthInterceptor` 401、`CsrfInterceptor` 403）放到 M1。
 2. **H**（和 1 并行）：`common/` 全部，内容见 §2.1 H。
 3. **各表所有者**（和 1、2 并行）：核对 `doc/db/schema.md` 里本表的规格（有异议提 Issue，A 决定），然后按 §1.3 的顺序写 `V1`～`V11`。参考 DDL 已在本地 MySQL 8.4.6 空库跑通（52 项正反例，schema 附录 A.1），可以直接拆用。
 4. **B**：RBAC 三表、MP 自动填充与逻辑删除验证（`delval = "id"`）、`@RequiresPermission` 注解定义；随后（M1）`security/` 权限切面与启动检查。scope 和归属拦截器由 F 在 M1 完成，端口接口先合入，C 再实现它。
@@ -398,8 +400,8 @@
 
 | 里程碑 | 内容 | 负责人 | 前置 |
 |---|---|---|---|
-| **M0 骨架** | 工程、`pom`（WAR）、`web.xml` 与 Java 配置、Flyway Bean、双账号、拦截器骨架、MP 插件与自动填充、`deleted` 验证；`common/` + `@RequiresPermission`/`@OperationLog` 两个注解定义；16 张表的迁移 V1～V11、`R__app_grants` | B、H、各表所有者 | 表规格已定（`doc/db/schema.md` v2，2026-11-23） |
-| **M1 认证 + 权限 + 分类标签 + 日志** | #1～#5；权限切面与启动检查（B）；scope、归属拦截器（F）；两级分类与标签 #20～#27、#38/#39；操作日志切面与 #44；`AuditWriter` | B、F、H | M0 |
+| **M0 骨架** | **第一步（B，开工后 2 天内合入）**：最小可运行骨架——WAR 在 Tomcat 10.1 启动、`DataSource` 连上 MySQL、Flyway Bean 启动时迁移、`GET /api/health` 返回 200（§2.4）。合入后并行：工程其余配置、双账号、MP 插件与自动填充、`deleted` 验证（B）；`common/` + `@RequiresPermission`/`@OperationLog` 两个注解定义（H、B）；16 张表的迁移 V1～V11、`R__app_grants`（各表所有者）。拦截器与切面不在 M0 | B、H、各表所有者 | 表规格已定（`doc/db/schema.md` v2，2026-11-23） |
+| **M1 认证 + 权限 + 分类标签 + 日志** | #1～#5 与登录、CSRF 拦截器（B）；权限切面与启动检查（B）；scope、归属拦截器（F）；两级分类与标签 #20～#27、#38/#39；操作日志切面与 #44；`AuditWriter` | B、F、H | M0 |
 | **M2 文章 + 媒体 + 用户管理** | #6～#10、#42（含逻辑删除、多维检索）；#28/#29/#43、`MediaRefService`；`ContentValidator`；状态机骨架和 `allowedActions`；用户管理 #33～#35、角色与权限点 #36/#37 | C、E、G | M1（切面、`TaxonomyService`、`AuditWriter`） |
 | **M3 审核 + 发布** | #11～#13；#14～#18（含立即发布）、批量 #40/#41；到期发布任务 | G、D、E | M2 |
 | **M4 公开 + 留痕 + 联调 + 报告** | #30/#31/#32；#19 和 `LatestTrailQuery`（#8 的派生字段在此补全）；媒体清理任务；A 前端全面去 mock 联调；ApiFox 全量；结题报告 | A、H、E，全员 | M3 |
@@ -409,7 +411,10 @@ A 的前端工作贯穿始终：M1 联调登录，M2 联调编辑端，M3 联调
 
 ```mermaid
 graph LR
-  M0B[B 工程/web.xml/Flyway/拦截器骨架/MP插件] --> M1Auth[B #1-#5 认证]
+  M0S[B 最小骨架 2 天内合入<br/>WAR 启动/DataSource/Flyway/health] --> M0B[B 其余配置/MP插件]
+  M0S --> M0H
+  M0S --> M0Def
+  M0B --> M1Auth[B #1-#5 认证 + 登录/CSRF 拦截器]
   M0H[H common + 两个注解] --> M1Auth
   M0Def[各表所有者 迁移 V1-V11] --> M1Auth
   M0B --> Gate[B 权限切面/启动检查]
@@ -457,6 +462,7 @@ graph LR
 | R17 | （v2.6）B 的工作量全组最深（RBAC + 切面 + 认证 + 骨架）；去掉 Boot 后骨架要手工装配 | M1 延后 | 已把 #36/#37 移给 G、Jackson / 校验 / 404 移给 H（决策 T8），归属 scope 与拦截器移给 F（B 约 8.5 人日）；自动填充与 MP 插件可在 M0 先合；H 先合两个注解定义，各人不必等切面实现 |
 | R18 | （v2.6 修订）切面、`@Transactional`、`@Async` 因配置遗漏而静默失效（没有 Boot 自动配置） | 权限闸、操作日志、事务看起来正常其实没生效 | 只用一个 Spring 容器（arch §2.10）；`PermissionCoverageChecker` 启动时断言 Controller 已被代理；M0 手工验证一次「编辑调管理员接口 → 404」与「事务回滚」 |
 | R19 | （v2.6 修订）自研的会话、CSRF 拦截器写错不会报错 | 越权或 CSRF 绕过 | 按 arch §5.1 实现；B 的 PR 由 A 重点审，手工验证记录覆盖：无会话 401、令牌缺失 / 错误 403、登录后旧令牌失效、停用账号下一次请求 401、超过 12 小时 401 |
+| R20 | M0 骨架拖延会卡住所有人（其余 7 人都要在它上面开工） | 全员空等 | B 的第一个 PR 只做最小骨架，2 天内合入（§2.4、§4）；拦截器、切面推到 M1；超过 2 天 A 介入拆分或协助 |
 | R7 | 不少规则从 CHECK 挪到了 Java（AUD-01～08、USER-01、TAX-01、MEDIA-01～03、ART-01，schema §6） | 漏写一条，数据库不会报错 | 每条规则在 PR 描述里写明在哪个方法校验；H 审所有写留痕的 PR |
 | R4 | C 是枢纽（端口实现、`ArticleFilter`、读服务），同时还要审 A、E、F 的 PR | C 一卡，M2～M4 全部延后 | C 在 M1 末先合入端口实现和读服务的接口骨架 |
 | R5 | A 同时负责全部前端和一块后端，还要审所有 PR | A 成为瓶颈 | A 的后端放在 M4，工作量轻；同伴审核人先审一轮，A 做最终审核 |
