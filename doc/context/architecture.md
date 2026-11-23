@@ -6,6 +6,8 @@
 >
 > `doc/context/project-overview.md` **不再是规则的真源**：它降为背景与取舍记录，保留需求来源、被否决的方案与"为什么这么定"的论证。本文只在引用**论证过程**时才指向它；出现取值冲突一律以 SRS 为准。
 >
+> **2026-11-23 按 SRS v2.6 更新**：授权由"一个 `AuthzInterceptor`"改为"`@RequiresPermission` 权限切面（Spring AOP）+ 归属拦截器 + 状态机"，Spring Security 仍只做认证；新增 `@OperationLog` 操作日志切面、RBAC 三表与 `sys_operation_log`（16 张表）、逻辑删除、批量逐条事务、媒体下载。改动处标"v2.6"。
+>
 > 本文的每一条决策若发生变更，必须同步 `doc/context/progress-tracker.md`。追溯脚本 `doc/design/traceability-check.py` 已按用户要求**暂停使用**，不再是改动后的强制关卡。
 
 ---
@@ -13,6 +15,34 @@
 ## 1. 架构总览
 
 一句话：**一个前后端分离的单体应用**。Vue 3 SPA 通过 REST 调用 Spring Boot；后端是唯一的写入者；MySQL 存结构化数据，本地磁盘存文件。没有缓存层，没有消息队列，没有独立检索服务，没有第二个服务进程。
+
+**系统架构图（v2.6，报告用图的源）：**
+
+```mermaid
+flowchart TB
+    Browser["浏览器 · Vue 3 SPA<br/>（后台 /admin + 公开站）"]
+    Nginx["Nginx<br/>静态资源 + 反向代理 /api/**"]
+    Browser -- "HTTPS 同源<br/>Session Cookie + X-XSRF-TOKEN" --> Nginx
+    subgraph Boot["Spring Boot 3 单体（Spring MVC）"]
+        direction TB
+        Sec["Spring Security 过滤器链<br/>认证 401 · CSRF 403 · 会话"]
+        DS["DispatcherServlet"]
+        Bind["ArticleScopeBinder<br/>（按 article:read:all 设 scope）"]
+        Log["@OperationLog 切面 · @Order(1)<br/>（H，最外层）"]
+        Perm["@RequiresPermission 切面 · @Order(2)<br/>权限闸 404（B）"]
+        Ctl["Controller（@Validated）"]
+        Svc["Service（@Transactional）<br/>归属闸 404 · 状态机 状态闸 409"]
+        MP["MyBatis-Plus 插件链<br/>归属 InnerInterceptor · 分页 · 乐观锁 · 防全表"]
+        Mapper["Mapper / XML"]
+        Task["@Scheduled 任务<br/>到期发布 · 未关联清理 · 删文件重试"]
+        Sec --> DS --> Bind --> Log --> Perm --> Ctl --> Svc --> MP --> Mapper
+        Task --> Svc
+    end
+    Nginx --> Sec
+    Mapper --> DB[("MySQL 8<br/>16 张表 · Flyway")]
+    Svc --> Disk[("本地磁盘 storage/<br/>StorageService")]
+    Log -. "@Async + REQUIRES_NEW" .-> DB
+```
 
 ```
 浏览器 (Vue 3 SPA)
@@ -22,11 +52,12 @@ Nginx ──── 静态资源：前端打包产物
    │
    └── 反向代理 /api/** ──▶ Spring Boot (单体，单实例)
                                 │
-                                ├─ Spring Security 过滤器链 ── 只做认证
-                                ├─ AuthzInterceptor ────────── 三道闸门授权
+                                ├─ Spring Security 过滤器链 ── 只做认证、会话、CSRF
                                 ├─ ArticleScopeBinder ──────── 设置归属 scope
+                                ├─ @OperationLog 切面 ───────── 记录后台写操作（v2.6）
+                                ├─ @RequiresPermission 切面 ─── 权限闸（v2.6，替代 AuthzInterceptor）
                                 ├─ Controller → Service → Mapper
-                                │        │
+                                │        │      └─ 归属闸（拦截器 + Repository 收口）、状态闸（状态机）
                                 │        ├──▶ MySQL 8（结构化数据，唯一事实来源）
                                 │        └──▶ 本地磁盘 storage/（文件字节）
                                 └─ @Scheduled 任务线程 ── 到期自动发布、孤儿文件清理
@@ -58,16 +89,19 @@ Nginx ──── 静态资源：前端打包产物
 | 语言 / 运行时 | Java 21 (LTS) | 后端语言；需要时可用虚拟线程 |
 | 后端框架 | Spring Boot 3.x（**Spring MVC**） | REST 接口、事务、依赖注入、配置 |
 | 认证 | Spring Security 6（**仅认证**） | 会话、httpOnly Cookie、CSRF、BCrypt、会话固定防护 |
-| 授权 | **自研** `AuthzInterceptor` | 三道闸门（角色 / 归属 / 状态）的唯一判定点 |
-| 持久化 | MyBatis-Plus | ORM、分页、以及行级归属拦截器 |
+| 授权（v2.6） | **Spring AOP**：自定义注解 `@RequiresPermission` + `PermissionAspect`（`@Around`） | 权限闸（按权限点）；归属闸在拦截器与 Repository、状态闸在状态机（§5.2） |
+| 操作日志（v2.6） | **Spring AOP**：`@OperationLog` + `OperationLogAspect`，`@Async` + `REQUIRES_NEW` 写入 | 后台写操作与登录登出的运维日志（SRS §6.7） |
+| 持久化 | MyBatis-Plus | ORM、分页、乐观锁 `@Version`、逻辑删除 `@TableLogic`、自动填充 `MetaObjectHandler`、防全表更新、行级归属拦截器 |
 | 数据库 | MySQL 8 | 结构化数据的唯一事实来源；需要窗口函数 |
-| Schema 迁移 | Flyway | 版本化 DDL/DCL，含唯一管理员初始化与权限授予 |
+| Schema 迁移 | Flyway | 版本化 DDL/DCL，含角色与权限点种子、初始管理员与表级授权 |
 | 文件存储 | 本地磁盘 + `StorageService` 抽象 | 封面图、正文图片、文章音频 |
 | 定时任务 | Spring `@Scheduled` | 到期自动发布、孤儿文件兜底清理 |
 | 测试 | JUnit 5 + Spring Boot Test + MockMvc + **Testcontainers** [建议] | 接口级越权用例，跑真实 MySQL |
 | 构建 | Maven（单模块） | `pom.xml` 目前为空，依赖待补 |
 | 部署 | 前端静态产物 + 后端 jar，置于 **Nginx** 之后 [建议] | 反向代理、同源 Cookie |
 
+> **技术栈表述待任课老师确认（决策 D12）**：报告与 SRS 统一写"Spring Boot 3（Spring MVC）+ MyBatis-Plus，基于实验二 SSM 升级"。实验二用的是 SSM（XML 配置、`CommonsMultipartResolver`、`ResponseEntity<byte[]>` 下载）；本项目对应为 Boot 自动配置、`StandardServletMultipartResolver`、`Resource` 流式下载与 `ContentDisposition`（§5.4）。
+>
 > 具体版本号（Spring Boot / Vue / Element Plus / MyBatis-Plus）在实现开始前统一定版并写入 `pom.xml` 与 `package.json`。本文只锁定技术选型，不锁定补丁版本。
 
 ### 2.2 后端为什么是 Spring MVC，而不是 WebFlux
@@ -99,14 +133,15 @@ MySQL 在本项目里承担两个不能用 Java 代码替代的职责：
 
 ### 2.5 Flyway 的两个特殊职责
 
-Flyway 不只是管 DDL。它承担两件"必须结构性成立、不能写在 Java 里"的事：
+Flyway 不只是管 DDL。它承担三件"必须结构性成立、不能写在 Java 里"的事：
 
 | 迁移职责 | 服务的不变量 | 说明 |
 |---|---|---|
-| 初始化唯一的测试管理员账号 | SRS §1.4、§4.1.1、BR-ROLE-001 | 管理员不开放注册，只能由数据库初始化产生，且每个测试库有且仅有一个。密码以 BCrypt 哈希字面量写入迁移脚本 |
-| 对 `audit_log` 只授 `INSERT` / `SELECT` | BR-AUDIT-001、INV-04 | 应用数据库账号对该表没有 `UPDATE` / `DELETE` 权限。写错代码也删不掉留痕 |
+| 初始化测试管理员账号 | SRS §1.4、§4.1.1、BR-ROLE-001 | 管理员不开放注册，初始管理员只能由数据库初始化产生（v2.6 起其余管理员经角色分配产生，BR-ROLE-005）。密码以 BCrypt 哈希字面量写入迁移脚本 |
+| 写入角色、权限点及其对应关系（v2.6） | BR-RBAC-002、SRS §4.5 | 应用账号对 RBAC 三表只有 `SELECT`，角色权限只能随迁移变更，矩阵在运行期是不变量 |
+| 对 `audit_log`、`sys_operation_log` 只授 `INSERT` / `SELECT` | BR-AUDIT-001、BR-OPLOG-005、INV-04 | 应用数据库账号对这两张表没有 `UPDATE` / `DELETE` 权限。写错代码也删不掉留痕和日志 |
 
-第二件事尤其重要：如果只靠"我们没写删除接口"来保证留痕不可篡改，那下一次有人为了排查问题手写一条 SQL、或者加了个批量维护接口，约束就没了。把它降级为数据库权限，才是可证明的。
+最后一件事尤其重要：如果只靠"我们没写删除接口"来保证留痕不可篡改，那下一次有人为了排查问题手写一条 SQL、或者加了个批量维护接口，约束就没了。把它降级为数据库权限，才是可证明的。
 
 ### 2.6 文件存储：本地磁盘 + `StorageService` 抽象
 
@@ -169,17 +204,20 @@ Quartz 的持久化调度（或任何"发布任务表"方案）会引入一个�
 ```
 src/main/java/com/liang/cms/
 ├── CmsApplication.java
-├── config/          安全配置、MyBatis 配置、拦截器注册、调度开关、存储配置
+├── config/          安全配置、MyBatis 配置（插件链、MetaObjectHandler）、调度开关、存储配置
 ├── auth/            登录、登出、注册；读取当前用户；把用户身份放进请求上下文
-├── security/        三道闸门：AuthzInterceptor、RoleGate、OwnershipGate、StateGate
+├── security/        授权（v2.6）：@RequiresPermission、PermissionAspect、PermissionCoverageChecker、
+│                    PermissionService（每请求加载权限集）、OwnershipGate、
 │                    ArticleScopeBinder、ArticleScopeContext（唯一设置 scope 的地方）
+├── system/          系统管理（v2.6）：用户列表 / 启停 / 角色分配（G）、角色与权限点只读（B）、操作日志查询（H）
 ├── article/         文章聚合：Controller、Service、Repository、Mapper、Entity、DTO、状态机
 ├── taxonomy/        分类与标签
 ├── media/           上传、类型与大小校验、StorageService 实现、媒体交付出口
 ├── audit/           留痕写入与查询
 ├── publicapi/       博客前台公开接口（无认证，只读）
 ├── task/            后台任务：到期自动发布、孤儿文件清理
-└── common/          统一响应体、全局异常处理、错误码、分页对象
+└── common/          统一响应体、全局异常处理、错误码、分页对象、排序白名单解析、枚举
+    └── aop/         @OperationLog、OperationLogAspect、OperationLogWriter（v2.6，H）
 ```
 
 每个包的职责与**禁止事项**：
@@ -188,16 +226,17 @@ src/main/java/com/liang/cms/
 |---|---|---|
 | `config/` | 装配框架：注册拦截器、配置 Security 过滤链、定义存储根目录 | 出现业务判断（角色、状态、归属都不在这里判） |
 | `auth/` | 认证本身：校验密码、建立/销毁会话、注册编辑账号 | 判角色能不能做某件事（那是 `security/` 的事） |
-| `security/` | 授权：三道闸门、scope 设置、权限拒绝的统一响应 | 查询文章内容、返回业务数据 |
+| `security/` | 授权：权限切面、权限点覆盖检查、归属闸、scope 设置、权限拒绝的统一响应 | 查询文章内容、返回业务数据；在会话里缓存权限集（BR-RBAC-005） |
+| `system/` | 用户管理、角色与权限点只读、操作日志查询 | 修改角色的权限点（本期无此功能，BR-RBAC-002）；删除账号（BR-USER-002） |
 | `article/` | 文章聚合的全部读写、状态机 | 自行拼接文件路径、自行拼 SQL 的归属条件 |
-| `taxonomy/` | 分类与标签的增删改查与关联维护 | 判"谁能改分类"（角色闸统一判） |
+| `taxonomy/` | 分类树（两级）、排序、启停、标签的增删改查（逻辑删除）与关联维护 | 判"谁能改分类"（权限闸统一判） |
 | `media/` | 类型白名单与大小上限校验、落盘、媒体请求的判权与回写 | 决定"这篇文章的编辑是谁"（向 `article/` 查） |
 | `audit/` | 往 `audit_log` 写、按文章读 | 提供任何修改或删除留痕的方法——**这个包不该有 delete 与 update 方法** |
 | `publicapi/` | 匿名读取已发布文章的公开字段 | 调用任何写方法；接受任何影响可见性的参数 |
 | `task/` | 调度与幂等执行 | 绕过状态机直接改 `status`——发布也必须走状态机的迁移出口 |
 | `common/` | 技术性横切 | 依赖任何一个业务包 |
 
-**依赖方向规则：** `common` ← 所有包；`security` ← `article`/`media`/`audit`/`taxonomy`/`publicapi`；**`security` 不得反向依赖任何业务包**（否则闸门判定会被业务逻辑污染，不再是一个可以独立测试的东西）。`publicapi` 不得被任何后台包依赖。
+**依赖方向规则：** `common` ← 所有包；`security` ← `article`/`media`/`audit`/`taxonomy`/`publicapi`/`system`；**`security` 不得反向依赖任何业务包**（否则闸门判定会被业务逻辑污染，不再是一个可以独立测试的东西）。`publicapi` 不得被任何后台包依赖。
 
 ### 3.2 前端目录结构
 
@@ -243,22 +282,24 @@ web/
 
 ### 4.1 数据库（MySQL）—— 结构化数据的唯一事实来源
 
-十二张表，对应 SRS 已确立的领域划分（账号见 §4，文章与分类标签见 §7，留痕见 §6.6，媒体见 §6.4）。**字段级定义、函数依赖与范式论证、约束清单见 `doc/db/schema.md`**（2026-11-23 定稿，折中版）；本节只列每张表的职责。
+十六张表（v2.6；v1 为 12 张），对应 SRS 已确立的领域划分（账号与权限见 §4，文章与分类标签见 §7，留痕见 §6.6，操作日志见 §6.7，媒体见 §6.4）。**字段级定义、函数依赖与范式论证、约束清单见 `doc/db/schema.md`**（v2）；本节只列每张表的职责。
 
 | 表 | 所有者 | 存什么 | 关键约束 / 说明 |
 |---|---|---|---|
-| `user` | B | 账号、BCrypt 密码、`role` 单列枚举（`EDITOR` / `ADMIN`） | 单列而非角色关联表：多对多结构会在数据层允许一个账号挂两个角色，与 BR-ROLE-001 冲突；登录名只存小写规范形式 |
+| `role` / `permission` / `role_permission` | B | 2 个角色、27 个权限点及其对应关系（v2.6） | 运行时只读，种子随迁移写入（BR-RBAC-002） |
+| `user` | B | 账号、BCrypt 密码、`role_id` 外键、`status`（启用 / 停用） | **建角色表，但不建用户-角色多对多**：`role_id` 单值非空外键让"一个账号挂两个角色"在结构上无法表达（BR-ROLE-001，决策 D1）；账号不删除只停用；登录名只存小写规范形式 |
 | `login_throttle` | B | 按**登录名**的连续失败次数与锁定截止 | 故意不建指向 `user` 的外键：不存在的登录名也要计数（SRS §4.1.2） |
-| `category` | F | 封闭的分类集合 | 仅管理员维护；名称同类内不区分大小写唯一 |
-| `tag` | F | 开放的标签集合，扁平无层级 | 编辑可随文创建；名称规则同分类 |
-| `article` | C | 文章本体；`status` 存 6 个**英文代码**（与 api-spec §4.1 一致）；`cover_media_id` / `audio_media_id`；乐观锁 `version` | `author_id` 在组合索引首位；`published_at` 可空；`status` 与时间字段只经状态机写；**不存** `submitted_at`（由本轮提交留痕派生） |
+| `category` | F | 封闭的两级分类树：`parent_id`、`sort_order`、`status` | 仅管理员维护；逻辑删除；名称在未删除范围内不区分大小写唯一 |
+| `tag` | F | 开放的标签集合，扁平无层级 | 编辑可随文创建；逻辑删除；名称规则同分类 |
+| `article` | C | 文章本体；`status` 存 6 个**英文代码**（与 api-spec §4.1 一致）；`cover_media_id` / `audio_media_id`；乐观锁 `version`；逻辑删除 `deleted` | `author_id` 在组合索引首位；`published_at` 可空；`status` 与时间字段只经状态机写；**不存** `submitted_at`（由本轮提交留痕派生） |
 | `article_tag` | F | 文章与标签的 N:M 关联 | 交集筛选的实现基础 |
 | `media_format` | E | 8 种真实格式 → 大类、MIME、存储扩展名（字典） | 运行时只读；消除 `media_file` 里 MIME 对格式的传递依赖 |
-| `media_file` | E | 文件索引：所属文章、用途、真实格式、`storage_key`、大小、`linked_at` | **不存字节**，也不存路径、MIME、原始文件名；引用解除即删行 |
+| `media_file` | E | 文件索引：所属文章、用途、真实格式、`storage_key`、原始文件名（v2.6，下载用）、大小、`linked_at` | **不存字节**，也不存路径、MIME；引用解除即删行 |
 | `media_purge_job` | E | 删文件**失败**的记录与重试时间 | 只记失败、`@Scheduled` 重试、成功即删行（BR-MEDIA-004、BR-DEL-004） |
 | `reject_category` | D | 8 个驳回类别的代码、中文名、分组（字典） | 运行时只读（BR-CONTENT-005） |
 | `review_standard` | D | 审核标准版本登记（字典） | 运行时只读；升级 = 追加一个 INSERT 迁移（SRS §6.1.1） |
-| `audit_log` | H | 操作留痕 | 只增不改不删（见下）；操作人为 `USER` / `SYSTEM` 双主体（见下） |
+| `audit_log` | H | 文章流程留痕（业务事实） | 只增不改不删（见下）；操作人为 `USER` / `SYSTEM` 双主体（见下）；与业务同事务 |
+| `sys_operation_log` | H | 系统操作日志（运维审计，v2.6） | 只增不改不删；独立事务、尽力写入；不存请求体与密码（SRS §6.7） |
 
 状态、动作、角色等枚举在库里与接口里是**同一套英文代码**，后端不做中英映射；中文只出现在界面与 `reject_category.label`。
 
@@ -271,7 +312,9 @@ web/
 
 落地为一条 CHECK 约束 `ck_audit_actor`：`(actor_type = 'USER') = (actor_id IS NOT NULL) AND (actor_type = 'SYSTEM') = (action = 'AUTO_PUBLISH')`，既让两列互相咬合，也锁住"只有到期自动发布是系统"。`actor_type` 能由 `action` 推出，属于**有意保留的受控冗余**（理由见 `doc/db/schema.md` §5.1）。把"人类留痕必须有人、系统留痕必须没有账号"写成数据库层的结构约束，而不是 Service 里的一句 `if`——后者在新增第 8 类留痕、或有人图省事给系统留痕填一个管理员 id 时都不会被审查到。
 
-外键动作取默认的 `RESTRICT`，方向与 INV-04（留痕只增不改不删）一致：**只要一个账号还留着任何一条留痕，它就删不掉。** 因此将来实现「账号停用」时只有停用一条路，不能靠删账号——这不是额外加的规则，而是这张表的外键自带的结论。
+外键动作取默认的 `RESTRICT`，方向与 INV-04（留痕只增不改不删）一致：**只要一个账号还留着任何一条留痕，它就删不掉。** 因此 v2.6 的「账号停用」只有停用一条路，不能靠删账号（BR-USER-002）——这不是额外加的规则，而是这张表的外键自带的结论。
+
+**逻辑删除（v2.6）。** `article`、`category`、`tag` 带 `deleted` 列，删除写入本行 `id`（`@TableLogic(delval = "id")`，M0 由 B 验证，见 `doc/db/schema.md` §1）。逻辑删除后外键 RESTRICT 不再能代替引用检查，分类、标签的"被引用不能删"改由 F 的 Service 做 `EXISTS` 检查；手写 SQL 必须显式带 `deleted = 0`（SRS X-DEL-01）。
 
 **`audit_log` 的其余条件字段。** SRS §6.6 的"条件必填 / 不写入即 `NULL`"规则，库里只放 3 条关键条件 CHECK（上面的操作人、驳回必须有类别与意见、下架必须有原因），其余由 `audit/` 的 `AuditWriter` 在写入前校验（规则 AUD-01～08，见 `doc/db/schema.md` §6.2）。两条唯一键兜底并发：一轮提交最多一个审核结论，一次审核通过最多被到期发布一次。
 
@@ -282,9 +325,9 @@ web/
 | 账号 | 权限 | 用途 |
 |---|---|---|
 | 迁移账号 | DDL + DCL 全量 | 只由 Flyway 使用 |
-| 应用账号 | 业务表 `SELECT`/`INSERT`/`UPDATE`/`DELETE`；三张字典表（`media_format`、`reject_category`、`review_standard`）仅 `SELECT`；`audit_log` 仅 `SELECT`/`INSERT` | 后端运行时使用 |
+| 应用账号 | `login_throttle`、`article_tag`、`media_file`、`media_purge_job` 全部 CRUD；`user`、`category`、`tag`、`article` 仅 `SELECT`/`INSERT`/`UPDATE`（逻辑删除或不可删除）；三张字典表与三张 RBAC 表仅 `SELECT`；`audit_log`、`sys_operation_log` 仅 `SELECT`/`INSERT` | 后端运行时使用 |
 
-这是一条**结构性**保证：留痕不可篡改不是因为"我们没写删除接口"，而是因为应用连一把能删的钥匙都没有。
+这是一条**结构性**保证：留痕不可篡改不是因为"我们没写删除接口"，而是因为应用连一把能删的钥匙都没有。同理，应用改不了角色的权限点（给编辑授 `review:approve`），也物理删除不了文章。
 
 ### 4.2 文件存储（本地磁盘）
 
@@ -351,28 +394,62 @@ web/
 | 登录 | `POST /api/auth/login` |
 | 登出 | `POST /api/auth/logout`，会话失效 |
 | 注册 | `POST /api/auth/register`，**只创建编辑角色**，注册成功即启用（SRS §4.1.1、FR-USER-001） |
-| 管理员账号 | 不开放注册；由 Flyway 迁移在测试库初始化时创建，每库有且仅有一个 |
+| 管理员账号 | 不开放注册；初始管理员由 Flyway 迁移创建；其余管理员只能经角色分配产生，至少保留一个启用管理员（SRS BR-ROLE-004/005） |
+| 停用账号（v2.6） | `UserDetailsService` 对 `DISABLED` 账号按普通失败处理（统一 401）；已有会话由每请求加载用户状态时发现并返回 401（BR-USER-001） |
+| 授权 | **不启用** `@PreAuthorize` / `authorizeHttpRequests` 的角色规则，只保留"`/api/**` 除白名单外需已认证"；授权全部交给 §5.2 的权限切面，避免两套授权并存（决策 D2） |
 | 未认证访问后台接口 | **401** |
 
 > **关于 CSRF 令牌。** 会话凭据 `JSESSIONID` 保持 httpOnly；CSRF 令牌存于服务端会话并通过 `#1` 接口下发，前端只把它放进请求头，不作为第二份凭据持久化在可读 cookie 里。单独的 CSRF 令牌泄露不构成攻击，攻击者必须同时持有会话 cookie。
 >
 > 本架构不采用 JWT 存 localStorage 的方案：token 存在 JS 可读的位置，等于把凭据暴露给每一个 XSS 点（此为本文的取舍；上游文档未涉及该议题）。
 
-### 5.2 授权：三道闸门
+### 5.2 授权：三道闸门（v2.6：权限闸改为 AOP 切面）
 
 一个请求要通过**三道互相独立**的闸门，全过才放行（SRS §4.4）：
 
-| 闸门 | 判断的问题 | 输入 | 失败结果 |
-|---|---|---|---|
-| 角色闸 | 你的角色允许这个动作吗 | 当前用户 `role` + 目标动作 | 404 |
-| 归属闸 | 这条数据是你的吗 | `article.author_id` vs 当前用户 | 404 |
-| 状态闸 | 当前状态允许这个动作吗 | `article.status` + 目标迁移 | 409 |
+| 闸门 | 判断的问题 | 输入 | 实现（v2.6） | 失败结果 |
+|---|---|---|---|---|
+| 权限闸 | 你的角色有这个接口声明的权限点吗 | 当前用户角色的权限集 + 方法上的 `@RequiresPermission("review:approve")` | `PermissionAspect`（`@Around`，B） | 404 |
+| 归属闸 | 这条数据是你的吗 | `article.author_id` vs 当前用户；是否持有 `article:read:all` | `ArticleScopeBinder` + MP `InnerInterceptor` + `ArticleRepository` 写路径收口（§5.3） | 404 |
+| 状态闸 | 当前状态允许这个动作吗 | `article.status` + 目标迁移 | 状态机的条件 UPDATE（G） | 409 |
 
-**角色闸与归属闸失败一律返回 404，响应与"资源不存在"逐字节一致；状态闸失败返回 409。** 若角色闸返回 403、归属闸返回 404，攻击者仅凭状态码就能分辨"这篇文章存在但不是你的"，等于泄露资源存在性；能走到状态闸说明前两闸已过、请求者对该资源的可见性本来确定，因此 409 不泄露新信息（SRS §4.4）。
+**权限闸与归属闸失败一律返回 404，响应与"资源不存在"逐字节一致；状态闸失败返回 409。** 若权限闸返回 403、归属闸返回 404，攻击者仅凭状态码就能分辨"这篇文章存在但不是你的"，等于泄露资源存在性；能走到状态闸说明前两闸已过、请求者对该资源的可见性本来确定，因此 409 不泄露新信息（SRS §4.4）。
 
-**401 与 404 可以并存，不矛盾：** 401 只发生在"你根本没登录"这一种情况，它不携带任何关于目标资源的信息，攻击者从自己的登录态本来就知道自己没登录。因此**未认证 = 401，已认证但角色闸／归属闸失败 = 404，状态闸失败 = 409**。
+**401 与 404 可以并存，不矛盾：** 401 只发生在"你根本没登录"这一种情况，它不携带任何关于目标资源的信息。因此**未认证 = 401，CSRF 失败 = 403，已认证但权限闸／归属闸失败 = 404，状态闸失败 = 409**。
 
-三道闸门全部实现在 `security/` 包内的一个 `AuthzInterceptor` 里。这是刻意的：本项目对外演示的核心就是这套权限模型，把判定拆散到注解、Service 与框架配置三处，会让"权限判断只有一处"这个可证明性根基消失。
+**请求鉴权链（流程图 3 的源，B 负责细化）：**
+
+```mermaid
+flowchart LR
+    R["请求 /api/**"] --> A{"已认证？<br/>（Security）"}
+    A -- 否 --> E401["401"]
+    A -- 是 --> C{"CSRF 令牌有效？<br/>（改变状态的请求）"}
+    C -- 否 --> E403["403"]
+    C -- 是 --> L["@OperationLog 切面开始计时"]
+    L --> P{"角色持有<br/>@RequiresPermission 的权限点？"}
+    P -- 否 --> E404a["404（与不存在一致）<br/>记一条失败日志"]
+    P -- 是 --> O{"归属闸：作用域内<br/>能查到这条数据？"}
+    O -- 否 --> E404b["404"]
+    O -- 是 --> S{"状态闸：当前状态<br/>允许该迁移？"}
+    S -- 否 --> E409["409"]
+    S -- 是 --> OK["执行业务 + 留痕（同事务）"]
+    OK --> W["切面 finally：异步写操作日志"]
+    E404a --> W
+    E404b --> W
+    E409 --> W
+```
+
+**v2.6 为什么改成切面**（推翻 v2.5"三道闸门全部实现在一个 `AuthzInterceptor`"）：课程评分表点名要求"基于 Spring AOP 的接口权限校验"；而权限点必须声明在具体的 Controller 方法上，注解 + 切面正是 Spring 的惯用写法。为了保住原来"权限判断只有一处可证明"的根基，改为三条结构保证：
+
+1. **判定点仍只有一个**：`PermissionAspect` 是全代码库唯一读取权限集并做比较的地方；Service 里不出现角色或权限判断（源码扫描测试断言 `hasPermission` 只在 `security/` 被调用）。
+2. **漏声明启动即失败**（BR-RBAC-003）：`PermissionCoverageChecker`（`ApplicationRunner`）启动时扫描全部 `@RequestMapping`，`/api/**` 下除白名单（登录、注册、CSRF 令牌、登出、当前用户、`/api/public/**`、媒体出口 #29 与下载 #43）外，缺 `@RequiresPermission` 的方法直接抛异常、应用起不来。
+3. **权限集每请求从库加载**（BR-RBAC-005）：`role_permission JOIN permission` 一条 SQL（N+1 落点），不缓存在会话里，所以角色分配、停用在下一次请求生效。
+
+**切面顺序**：`OperationLogAspect` `@Order(1)` 在最外层、`PermissionAspect` `@Order(2)` 在内，权限失败也能留下一条失败日志。`@Transactional` 代理在两者之内（Service 层），所以日志不在业务事务里。
+
+**与请求体校验的先后（待 A、B 在 M1 前确认，api-spec §16-#17）**：切面包在 Controller 代理上，而 Spring MVC 在调用代理**之前**就完成参数绑定、JSON 解析和 `@Valid`，所以请求体格式错误的 400 会先于权限闸 / 归属闸的 404。格式校验与资源是否存在无关，不泄露存在性；暂定接受这个顺序，越权用例一律用格式合法的请求体。v2.5 的 `HandlerInterceptor.preHandle` 在参数解析之前执行，没有这个差别。
+
+**批量接口**（#40～#42）：方法级权限闸只判一次（`review:approve` 等）；归属闸与状态闸对每条目在独立事务里判定（§6.5），逐条结果遵守同一 404 收口。
 
 ### 5.3 归属隔离的落地（本节是全文最重的一节）
 
@@ -384,8 +461,8 @@ BR-ISO-003 要求隔离"在数据层强制执行，漏一处即漏洞"。落地�
 | 请求 | scope | 效果 |
 |---|---|---|
 | `/api/public/**` | `PUBLIC` | 读文章时自动追加 `status = 'PUBLISHED'` |
-| `/api/**`，当前用户为管理员 | `ALL` | 读文章时不追加归属条件 |
-| `/api/**`，当前用户为编辑 | `OWNER(userId)` | 读文章时自动追加 `author_id = userId` |
+| `/api/**`，当前用户持有 `article:read:all`（管理员） | `ALL` | 读文章时不追加归属条件 |
+| `/api/**`，其余已认证用户（编辑） | `OWNER(userId)` | 读文章时自动追加 `author_id = userId` |
 
 **`ArticleScopeBinder` 是整个代码库里唯一能设置 scope 的类。** 没有任何 Controller、Service 或测试可以通过别的方式提升自己的可见范围——因为不存在这样的 API。这一点由一条源码扫描测试盯住：断言 `ArticleScopeContext` 的设置方法只出现在 `ArticleScopeBinder` 中（首选 ArchUnit 写一条规则；不引入新依赖的话，退化为一条读取 `src/main/java` 源码做文本断言的 JUnit 测试）。
 
@@ -406,11 +483,11 @@ BR-ISO-003 要求隔离"在数据层强制执行，漏一处即漏洞"。落地�
 - *每个查询手写归属条件* —— 这正是 BR-ISO-003 想避免的形态。漏一处不报错，只能靠 18 条越权用例碰巧覆盖到。
 - *`ArticleScope` 作为必填参数，编译期强制* —— 结构性上最强（漏传编译不过），但代价是所有 Mapper / Service 签名变形，对 8 人课程项目属偏重的投入。若将来读路径继续增多、源码扫描测试不够可靠，这是升级方向。
 
-**管理员的绕过为什么不是后门：** 管理员的 `ALL` 作用域由请求路径与角色推导得出，不接受任何来自客户端的输入，也不存在"临时提权"的方法。它落在同一个 `AuthzInterceptor` 的同一套判断里，因此和编辑的 `OWNER` 一样会被同一批越权用例打到。
+**管理员的绕过为什么不是后门：** 管理员的 `ALL` 作用域由请求路径与角色推导得出，不接受任何来自客户端的输入，也不存在"临时提权"的方法。它由 `ArticleScopeBinder` 依据权限集里是否有 `article:read:all` 统一推导，权限集又只来自数据库种子（应用账号改不了），因此和编辑的 `OWNER` 一样会被同一批越权用例打到。
 
 ### 5.4 媒体文件的访问判定
 
-所有媒体文件**只有一条出口**：`GET /api/media/{mediaId}`。磁盘上的 `storage/` 目录不对任何静态资源映射开放，也没有可通过 Nginx 直达的路径（这条边界由 §3.4 的测试断言守住）。
+所有媒体文件**只有一个判权入口**，对外两个路径：在线访问 `GET /api/media/{mediaId}`（#29，`inline`，音频支持 Range）与下载 `GET /api/media/{mediaId}/download`（#43，v2.6，`attachment`）。两者共用同一个 `MediaAccessPolicy`，判定结果必须逐条一致。磁盘上的 `storage/` 目录不对任何静态资源映射开放，也没有可通过 Nginx 直达的路径（这条边界由 §3.4 的测试断言守住）。
 
 判定流程（与 `doc/api/api-spec.md` §10.2、FR-MEDIA-002 对齐；顺序固定）：
 
@@ -428,6 +505,16 @@ BR-ISO-003 要求隔离"在数据层强制执行，漏一处即漏洞"。落地�
 **为什么必须经过应用而不是交给 Nginx 直发**（媒体判权属于界面上看不出来、只能靠测试兜的一类漏洞，见 `project-overview.md` §6.5 的批注）：直发 + UUID 不可猜路径的安全性退化为"猜不到"，而下架后文件依然在磁盘上、依然可匿名访问——"猜不到"不是"不可访问"。走应用判权之后，SRS §9.1 第 3 条的"未公开内容不泄露"才是一条可被自动化用例证明的陈述。
 
 代价是文件 IO 经过 JVM，吞吐不如 Nginx 直发；音频上限 20 MB，会占用请求线程。对 8 人内网项目，这个代价远小于它换来的可证明性。
+
+**上传与下载的 Spring 实现（v2.6，实验二的延续，E 负责）：**
+
+| 环节 | 实验二（SSM） | 本项目 |
+|---|---|---|
+| 接收 | `CommonsMultipartResolver`（XML 配置） | Boot 自动配置的 `StandardServletMultipartResolver`；`spring.servlet.multipart.max-file-size` / `max-request-size` 限大小 |
+| 校验 | 扩展名 | 魔数判真实格式 + 白名单字典 `media_format` + 用途匹配 |
+| 存储 | 直接写目录 | `StorageService` 接口，本地磁盘实现（可 `@ConditionalOnProperty` 换实现） |
+| 下载 | `ResponseEntity<byte[]>` 整读 | `ResponseEntity<Resource>` 流式；`ContentDisposition.attachment().filename(originalName, UTF_8)`（RFC 5987）；在线访问用 `inline` + `ResourceRegion` 支持 Range |
+| 判权 | 无 | 与文章状态绑定，任何拒绝 404 |
 
 ### 5.5 博客前台公开接口
 
@@ -461,6 +548,22 @@ WHERE t.rn = 1
 1. 子查询的 `article_id IN (...)` 用的是**已经过归属过滤、已经分页**的文章 id 列表，而不是全量。顺序反了就会通过"返回了不属于我的文章的原因"泄露内容，与 BR-SEARCH-003 的同类风险一致。
 2. 这是一次额外查询（主查询 + 留痕查询，共 2 次），不是 N+1。
 3. 列表还要展示操作人与驳回类别（SRS §7.2（3）），因此查询须带 `actor_type`／`actor_id` 与 `reject_category_code`，并按需关联账号名；只取原因与时间会漏字段。
+
+### 5.7 系统操作日志（v2.6，H 负责）
+
+- 注解：`@OperationLog(module = "ARTICLE", operation = "ARTICLE_DELETE", targetType = "ARTICLE", targetId = "#id")`，`targetId` 用 SpEL 从方法参数取值；批量操作不填 `targetId`。
+- 切面：`OperationLogAspect`（`@Around`，`@Order(1)`）记录开始时间，`finally` 里组装记录（操作人、方法与路径、客户端 IP、成功与否、错误码、耗时），交给 `OperationLogWriter`。
+- 写入：`OperationLogWriter.write` 标 `@Async` + `@Transactional(propagation = REQUIRES_NEW)`，在独立线程、独立事务里 INSERT；失败只写应用日志，不影响业务（BR-OPLOG-004）。
+- 登录成功、失败、登出不经过 Controller 切面（在 Security 过滤链里），由 `AuthenticationSuccessHandler` / `FailureHandler` / `LogoutSuccessHandler` 调用同一个 `OperationLogWriter`。登录失败不记尝试的登录名（BR-OPLOG-003）。
+- 不记请求体、不记密码；读操作（GET）不记。
+- 与 `audit_log` 的分工见 SRS §6.7：留痕与业务同事务、失败则业务回滚；操作日志相反。两张表不合并（决策 D8）。
+
+### 5.8 检索、排序与自动填充（v2.6）
+
+- 多字段排序 `sort=updated_at,desc&sort=title,asc`：`common/` 提供 `SortParser`，按各列表的白名单（SRS BR-SEARCH-007）把字段映射成列名，再交给 MP `OrderItem`；非白名单字段 `400 40018`；末尾固定追加 `id`。**不允许把客户端字符串直接拼进 ORDER BY**。
+- 关键字匹配标题或摘要：`LambdaQueryWrapper.and(w -> w.like(title, kw).or().like(excerpt, kw))`；时间范围 `ge` / `lt`；按一级分类筛选展开为 `category_id IN (父, 子们)`（BR-SEARCH-008）。
+- 自动填充：`MetaObjectHandler` 填 `created_at` / `updated_at`（UTC）。状态迁移用 `LambdaUpdateWrapper` 不传实体，不触发填充，所以审核、发布不改文章的 `updated_at`。
+- 防误操作：注册 `BlockAttackInnerInterceptor`，拦截无 WHERE 的全表 UPDATE / DELETE。
 
 ---
 
@@ -546,6 +649,15 @@ WHERE id = #{id}
 
 补齐 SRS 与 `project-overview.md` 两侧后转绿；删掉留痕表里任一行、或新增一条带全新触发者的迁移路径，都再次报红（脚本现已按用户要求暂停使用，这项自动发现漂移的能力暂时没有替代品，见 `progress-tracker.md` 的 Open Questions #6）。这与 `progress-tracker.md` Session Notes 里那条固定检查项同族：**凡规则指向一份清单，就要问这份清单从哪里派生；如果答案是"人手抄的"，它迟早会漏。**
 
+### 6.5 批量操作的事务边界（v2.6，D、C 负责）
+
+批量审核通过 #40、批量下架 #41、批量删除 #42 都是"逐条独立事务"（SRS BR-BATCH-003）：
+
+- 外层方法**不加** `@Transactional`；每条调用单条业务方法，单条方法在**另一个 Bean** 上标 `@Transactional(propagation = REQUIRES_NEW)`，或用 `TransactionTemplate` 显式开事务。
+- **不能**在同一个类里 `this.approveOne(...)` 自调用：Spring 事务基于代理，自调用绕过代理，事务注解失效——这是 D 要在报告里讲清的重难点。
+- 每条捕获业务异常转成 `{id, success: false, code, message}`；不存在与无权都映射为 40400，不泄露存在性。
+- 条目上限 50（`400 40017`），先去重再计数。
+
 ---
 
 ## 7. 不变量
@@ -557,13 +669,15 @@ WHERE id = #{id}
 | INV-01 | 进入「已发布」的唯一路径是**审核通过**；不存在第二条入口 | 状态机单一出口 | 5 条禁止路径的用例 + 源码扫描 |
 | INV-02 | 每一条针对 `article` 的读查询都带归属条件；scope 只能由 `ArticleScopeBinder` 设置 | MyBatis-Plus 拦截器 | 18 条越权用例 + 源码扫描 |
 | INV-03 | 管理员不能通过任何接口修改文章内容 | 审核接口的 DTO 里没有内容字段；写路径收口 | 禁止组合用例 + 审核页无编辑控件 |
-| INV-04 | `audit_log` 只增、不改、不删 | MySQL 表级权限（应用账号仅 `INSERT`/`SELECT`） | 集成测试直接用应用账号 `UPDATE`，断言失败 |
+| INV-04 | `audit_log`、`sys_operation_log` 只增、不改、不删；RBAC 三表运行时只读 | MySQL 表级权限（应用账号仅 `INSERT`/`SELECT`、RBAC 仅 `SELECT`） | 集成测试直接用应用账号 `UPDATE`，断言失败 |
 | INV-05 | 未发布文章的媒体文件不可匿名访问；下架后**立即**失效 | 媒体单一出口 + `storage/` 不在静态映射中 | TU-09 / TU-10 + 静态映射断言 |
 | INV-06 | 正文只存 Markdown 原文；任何字段都不接受 HTML / 脚本 / iframe；视频只存 `https` URL | 字段类型与协议校验 | 禁止组合用例 |
 | INV-07 | `published_at` 只由系统写入；同周期重试不覆盖，下架后再发布更新为本次时间（BR-PUB-006、SRS §5.5） | DTO 无该字段 + 到期发布以 `status='SCHEDULED'` 为门闩，并以本周期无「到期自动发布」留痕防重复 | 同周期重试 + 下架后再发布用例 |
 | INV-08 | `article.author_id` 创建后不可修改 | DTO 无该字段 + 写路径收口 | 禁止组合用例 |
 | INV-09 | 三道闸门的拒绝一律 404，响应体与"资源不存在"完全一致 | 统一异常处理 | 断言两种响应体逐字节相等的用例 |
 | INV-10 | 公开接口只返回已发布文章，且无任何可绕过它的参数 | `PUBLIC` scope 在拦截器追加条件 | 公开接口用例（含 `status=DRAFT` 无效断言） |
+| INV-11（v2.6） | 每个 `/api/**` 后台接口都声明权限点或在白名单内 | `PermissionCoverageChecker` 启动检查 | 应用启动失败 |
+| INV-12（v2.6） | 已逻辑删除的文章、分类、标签不出现在任何查询结果中 | `@TableLogic` 自动条件 + 手写 SQL 显式 `deleted = 0` | X-DEL-01 用例 |
 
 以下四条需要展开说明，因为它们不是"多加一条校验"，而是用结构消掉了一整类问题。
 
@@ -619,10 +733,15 @@ WHERE id = #{id}
 | 不建发布任务表、用 `@Scheduled` | 避免第二处任务状态来源 |
 | 发布 UPDATE 以 `status='SCHEDULED'` 为门闩，同周期靠无发布留痕防重复（不使用 `published_at IS NULL`） | BR-PUB-006、SRS §5.5、§5.2 #10 |
 | 越权测试跑 Testcontainers 真 MySQL | SRS §9.1 第 2 / 3 条需要可信的自动化用例 |
-| 三道闸门集中在一个拦截器 | SRS §4.4、可证明性要求 |
+| ~~三道闸门集中在一个拦截器~~ → v2.6：权限闸为 `@RequiresPermission` 切面，归属闸、状态闸不变；判定点唯一 + 启动覆盖检查 | SRS §4.4、BR-RBAC-003、课程评分表"基于 Spring AOP 的接口权限校验" |
+| 建角色、权限点表，但用户只有一个 `role_id`（不建多对多） | BR-ROLE-001、BR-RBAC-001（决策 D1） |
+| 角色权限运行时只读 | BR-RBAC-002（决策 D5），保住 §4.5 矩阵不变量 |
+| 操作日志与留痕分两张表，日志独立事务 | SRS §6.7、BR-OPLOG-004（决策 D8） |
+| 文章、分类、标签逻辑删除，删除标记写 `id` | BR-DEL-002、BR-DEL-007 |
+| 批量逐条 `REQUIRES_NEW` | BR-BATCH-003 |
 | 统一 404 | 三道闸门模型的存在性保密要求 |
 | `audit_log` 加 `actor_type`、`actor_id` 可空 | BR-AUDIT-004、SRS §5.2 #10、X-AUDIT-01 |
-| 12 张表按 BCNF 定稿，保留 4 处受控冗余（`actor_type`、`status`、`published_at`、封面 / 音频外键） | 2026-11-23 A 批准折中版，见 `doc/db/schema.md` §0、§5 |
+| 16 张表（v2；v1 为 12 张）按 BCNF 定稿，保留 4 处受控冗余（`actor_type`、`status`、`published_at`、封面 / 音频外键） | 2026-11-23 A 批准折中版，见 `doc/db/schema.md` §0、§5 |
 | 枚举在库里存英文代码，不做中英映射 | api-spec §4.1、§15 冲突 9 |
 | 登录失败计数单独建表 `login_throttle` | SRS §4.1.2（不存在的登录名也计数） |
 | 删文件失败写 `media_purge_job` 重试 | BR-MEDIA-004、BR-DEL-004（"记录并自动重试"） |
@@ -665,7 +784,7 @@ WHERE id = #{id}
 | `CMS-SRS.md` | **唯一主文档（上游）**：业务规则、状态与迁移、留痕类别、权限矩阵与验收标准的定义处。本文引用的所有 `BR-*` 编号都以它为准 |
 | `doc/context/project-overview.md` | **背景与取舍记录（已降级，不再是规则真源）**：需求来源、被否决的方案与"为什么这么定"的论证。本文只引用其中的论证过程；取值冲突一律以 SRS 为准 |
 | `doc/context/progress-tracker.md` | 决策记录；本文的每个决策变更都要在此留痕 |
-| `doc/db/schema.md` | 12 张表的字段级定义、范式论证、约束分工与迁移顺序；本文 §4.1 的展开 |
+| `doc/db/schema.md` | 16 张表的字段级定义、范式论证、约束分工与迁移顺序；本文 §4.1 的展开 |
 | `doc/context/team-division.md` | 人员分工、表所有权与任务细分规则 |
 | `doc/design/traceability-check.py` | 追溯性校验脚本（**已暂停使用**，不再是改动后的强制关卡） |
 | `doc/reference/chatgpt-srs-conversation.md` | 需求原始输入归档，**当前仓库内缺失**（2026-09-29 仓库事故的未恢复项之一） |
