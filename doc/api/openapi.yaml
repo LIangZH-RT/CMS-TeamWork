@@ -1,16 +1,20 @@
 openapi: 3.0.3
 info:
   title: CMS-TeamWork 前后端统一接口（草案）
-  version: 0.1.0
+  version: 0.2.0
   license:
     name: Proprietary (team internal draft)
-  description: '依据 CMS-SRS.md v2.5 与 doc/context/architecture.md。与 doc/api/api-spec.md 一致；详细规则、错误码与追溯以 doc/api/api-spec.md 为准。
+  description: '依据 CMS-SRS.md v2.6 与 doc/context/architecture.md。与 doc/api/api-spec.md 一致；详细规则、错误码与追溯以 doc/api/api-spec.md 为准。
 
 
     认证：服务端会话 Cookie（JSESSIONID，HttpOnly）+ CSRF 请求头 X-XSRF-TOKEN（登录除外的所有写请求）。不使用 JWT。
 
 
-    统一响应体 {code, message, data}；HTTP 状态码按 SRS（400/401/403/404/409）。角色闸、归属闸失败统一 404。'
+    统一响应体 {code, message, data}；HTTP 状态码按 SRS（400/401/403/404/409）。权限闸（@RequiresPermission，AOP）、归属闸失败统一 404；权限不足不返回 403。每个操作的 x-permission 为所需权限点（anonymous = 匿名，authenticated = 仅需登录），与 api-spec §3.4 一致。
+
+
+
+    v0.2（SRS v2.6）：新增 #33～#44 共 12 个接口，11 处已有接口改动，新增 7 个错误码，见 api-spec §17。'
 servers:
 - url: /
   description: 同源部署，Nginx 反向代理 /api/**
@@ -19,6 +23,8 @@ security:
 tags:
 - name: AUTH
   description: 认证与账号
+- name: USER
+  description: 用户、角色与权限点（v2.6）
 - name: ARTICLE
   description: 文章管理
 - name: SUBMIT
@@ -27,6 +33,8 @@ tags:
   description: 审核与下架
 - name: AUDIT
   description: 操作留痕
+- name: OPLOG
+  description: 系统操作日志（v2.6）
 - name: TAX
   description: 分类与标签
 - name: MEDIA
@@ -57,6 +65,7 @@ paths:
                   properties:
                     data:
                       $ref: '#/components/schemas/CsrfToken'
+      x-permission: anonymous
   /api/auth/register:
     post:
       tags:
@@ -65,7 +74,11 @@ paths:
       description: '只能创建 EDITOR；注册不建立会话。需要 CSRF（匿名令牌）。
 
 
-        覆盖需求：FR-USER-001、§4.1.1'
+        覆盖需求：FR-USER-001、§4.1.1
+
+
+
+        v2.6：写入 role_id = EDITOR、status = ENABLED。'
       security: []
       operationId: register
       parameters:
@@ -98,6 +111,7 @@ paths:
           $ref: '#/components/responses/CsrfInvalid'
         '409':
           $ref: '#/components/responses/Conflict'
+      x-permission: anonymous
   /api/auth/login:
     post:
       tags:
@@ -106,7 +120,11 @@ paths:
       description: '成功后更换会话标识并下发 JSESSIONID（HttpOnly; SameSite=Lax; Path=/），登录前的 CSRF 令牌随之失效。不需要 CSRF。连续 5 次失败锁定 15 分钟；失败与锁定响应一致（40101）。
 
 
-        覆盖需求：FR-AUTH-001、FR-AUTH-003、§4.1.2'
+        覆盖需求：FR-AUTH-001、FR-AUTH-003、§4.1.2
+
+
+
+        v2.6：已停用账号按 40101 统一失败（BR-USER-001）；成功、失败都记操作日志（失败不记登录名）。'
       security: []
       operationId: login
       requestBody:
@@ -131,6 +149,7 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+      x-permission: anonymous
   /api/auth/logout:
     post:
       tags:
@@ -162,6 +181,7 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/CsrfInvalid'
+      x-permission: authenticated
   /api/auth/me:
     get:
       tags:
@@ -170,7 +190,11 @@ paths:
       description: '返回当前用户与角色，用于前端角色分流。
 
 
-        覆盖需求：FR-AUTH-005'
+        覆盖需求：FR-AUTH-005
+
+
+
+        v2.6：增加 role_name、status、updated_at、permissions（FR-AUTH-005、BR-RBAC-005）。'
       operationId: getMe
       responses:
         '200':
@@ -183,9 +207,10 @@ paths:
                 - type: object
                   properties:
                     data:
-                      $ref: '#/components/schemas/User'
+                      $ref: '#/components/schemas/CurrentUser'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+      x-permission: authenticated
   /api/articles:
     get:
       tags:
@@ -194,7 +219,11 @@ paths:
       description: '编辑结果集强制附加 author_id=当前用户；total 基于过滤后结果。
 
 
-        覆盖需求：FR-ARTICLE-003、FR-ARTICLE-006、BR-SEARCH-001~005、X-ISO-01~04'
+        覆盖需求：FR-ARTICLE-003、FR-ARTICLE-006、BR-SEARCH-001~005、X-ISO-01~04
+
+
+
+        v2.6：category_id 为一级分类时含子分类（BR-SEARCH-008）；keyword 匹配标题或摘要；时间范围左闭右开；sort 改为 字段,方向 多值格式，旧取值 updated_at_desc 等作废；非白名单 400 40018。'
       operationId: listArticles
       parameters:
       - $ref: '#/components/parameters/Page'
@@ -209,17 +238,51 @@ paths:
             $ref: '#/components/schemas/ArticleStatus'
       - $ref: '#/components/parameters/CategoryFilter'
       - $ref: '#/components/parameters/TagIdsFilter'
+      - $ref: '#/components/parameters/KeywordFilter'
       - $ref: '#/components/parameters/TitleFilter'
       - $ref: '#/components/parameters/AuthorFilter'
-      - name: sort
+      - name: created_from
         in: query
         schema:
           type: string
-          enum:
-          - updated_at_desc
-          - updated_at_asc
-          - created_at_desc
-          default: updated_at_desc
+          format: date-time
+      - name: created_to
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: updated_from
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: updated_to
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: published_from
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: published_to
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: sort
+        in: query
+        style: form
+        explode: true
+        schema:
+          type: array
+          items:
+            type: string
+            pattern: ^(updated_at|created_at|published_at|title|id),(asc|desc)$
+          default:
+          - updated_at,desc
+        description: 多字段排序，可重复，按出现顺序生效；末尾固定追加 id（v2.6，BR-SEARCH-007）。
       responses:
         '200':
           description: 成功
@@ -245,6 +308,7 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+      x-permission: article:read
     post:
       tags:
       - ARTICLE
@@ -252,7 +316,11 @@ paths:
       description: '仅编辑；管理员调用 404。系统字段或未知字段 → 400 FIELD_NOT_WRITABLE。正文规则见 doc/api/api-spec.md §6.0。
 
 
-        覆盖需求：FR-ARTICLE-001、FR-TAX-003、FR-MEDIA-004'
+        覆盖需求：FR-ARTICLE-001、FR-TAX-003、FR-MEDIA-004
+
+
+
+        v2.6：选用停用分类 400 40015。'
       security:
       - sessionCookie: []
         csrfHeader: []
@@ -283,6 +351,7 @@ paths:
           $ref: '#/components/responses/CsrfInvalid'
         '404':
           $ref: '#/components/responses/NotFound'
+      x-permission: article:create
   /api/articles/counts:
     get:
       tags:
@@ -314,6 +383,7 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+      x-permission: article:read
   /api/articles/{id}:
     parameters:
     - $ref: '#/components/parameters/ArticleId'
@@ -342,6 +412,7 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '404':
           $ref: '#/components/responses/NotFound'
+      x-permission: article:read
     put:
       tags:
       - ARTICLE
@@ -352,7 +423,11 @@ paths:
         必须带 expected_version（乐观锁）；与当前版本不一致返回 409 VERSION_CONFLICT（40907），状态冲突优先。
 
 
-        覆盖需求：FR-ARTICLE-002、FR-TAX-003、FR-MEDIA-001、FR-MEDIA-004'
+        覆盖需求：FR-ARTICLE-002、FR-TAX-003、FR-MEDIA-001、FR-MEDIA-004
+
+
+
+        v2.6：选用停用分类 400 40015。'
       security:
       - sessionCookie: []
         csrfHeader: []
@@ -385,6 +460,7 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+      x-permission: article:update
     delete:
       tags:
       - ARTICLE
@@ -392,7 +468,11 @@ paths:
       description: '仅归属编辑；仅状态为草稿且无任何留痕；物理删除并清理媒体。
 
 
-        覆盖需求：FR-ARTICLE-005、BR-DEL-001~005'
+        覆盖需求：FR-ARTICLE-005、BR-DEL-001~005
+
+
+
+        v2.6：改为逻辑删除（BR-DEL-002），其余规则不变；记操作日志。'
       security:
       - sessionCookie: []
         csrfHeader: []
@@ -430,6 +510,7 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+      x-permission: article:delete
   /api/articles/{id}/submit:
     parameters:
     - $ref: '#/components/parameters/ArticleId'
@@ -467,6 +548,7 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+      x-permission: article:submit
   /api/articles/{id}/withdraw:
     parameters:
     - $ref: '#/components/parameters/ArticleId'
@@ -502,6 +584,7 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+      x-permission: article:withdraw
   /api/articles/{id}/reschedule:
     parameters:
     - $ref: '#/components/parameters/ArticleId'
@@ -545,6 +628,7 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+      x-permission: article:reschedule
   /api/reviews/queue:
     get:
       tags:
@@ -587,6 +671,7 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '404':
           $ref: '#/components/responses/NotFound'
+      x-permission: review:queue
   /api/reviews/standard:
     get:
       tags:
@@ -613,6 +698,7 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '404':
           $ref: '#/components/responses/NotFound'
+      x-permission: review:queue
   /api/articles/{id}/approve:
     parameters:
     - $ref: '#/components/parameters/ArticleId'
@@ -656,6 +742,7 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+      x-permission: review:approve
   /api/articles/{id}/reject:
     parameters:
     - $ref: '#/components/parameters/ArticleId'
@@ -699,6 +786,7 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+      x-permission: review:reject
   /api/articles/{id}/unpublish:
     parameters:
     - $ref: '#/components/parameters/ArticleId'
@@ -742,6 +830,7 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+      x-permission: review:unpublish
   /api/articles/{id}/audit-logs:
     parameters:
     - $ref: '#/components/parameters/ArticleId'
@@ -772,15 +861,20 @@ paths:
           $ref: '#/components/responses/Unauthenticated'
         '404':
           $ref: '#/components/responses/NotFound'
+      x-permission: audit:read
   /api/categories:
     get:
       tags:
       - TAX
-      summary: 分类列表
+      summary: 分类树
       description: '已登录可用；不分页。
 
 
-        覆盖需求：FR-TAX-001、FR-TAX-003'
+        覆盖需求：FR-TAX-001、FR-TAX-003
+
+
+
+        v2.6：返回两级分类树，一级与二级各按 sort_order、id 升序（FR-TAX-004）。'
       operationId: listCategories
       responses:
         '200':
@@ -798,6 +892,13 @@ paths:
                         $ref: '#/components/schemas/Category'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+      x-permission: category:read
+      parameters:
+      - name: status
+        in: query
+        schema:
+          $ref: '#/components/schemas/CategoryStatus'
+        description: ENABLED 时只返回启用分类（父分类停用则其子分类不返回）
     post:
       tags:
       - TAX
@@ -805,7 +906,11 @@ paths:
       description: '仅管理员；编辑调用 404。
 
 
-        覆盖需求：FR-TAX-001、BR-TAX-005'
+        覆盖需求：FR-TAX-001、BR-TAX-005
+
+
+
+        v2.6：可带 parent_id（只能是一级分类，否则 400 40016）与 sort_order。'
       security:
       - sessionCookie: []
         csrfHeader: []
@@ -815,7 +920,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TaxonomyNameRequest'
+              $ref: '#/components/schemas/CategoryCreateRequest'
       responses:
         '201':
           description: 创建成功
@@ -838,17 +943,22 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+      x-permission: category:create
   /api/categories/{id}:
     parameters:
     - $ref: '#/components/parameters/TaxId'
     put:
       tags:
       - TAX
-      summary: 修改分类名称
+      summary: 修改分类名称与父分类
       description: '仅管理员；被任意文章引用 → 409。
 
 
-        覆盖需求：FR-TAX-001、BR-TAX-004'
+        覆盖需求：FR-TAX-001、BR-TAX-004
+
+
+
+        v2.6：可改 parent_id；改名、改父分类都受引用保护（409 40904）；深度超限或成环 400 40016。'
       security:
       - sessionCookie: []
         csrfHeader: []
@@ -858,7 +968,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TaxonomyNameRequest'
+              $ref: '#/components/schemas/CategoryUpdateRequest'
       responses:
         '200':
           description: 成功
@@ -881,6 +991,7 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+      x-permission: category:update
     delete:
       tags:
       - TAX
@@ -888,7 +999,11 @@ paths:
       description: '仅管理员；被引用 → 409。
 
 
-        覆盖需求：FR-TAX-001、BR-TAX-004'
+        覆盖需求：FR-TAX-001、BR-TAX-004
+
+
+
+        v2.6：逻辑删除；有未删除子分类 409 40908；被未删除文章引用 409 40904。'
       security:
       - sessionCookie: []
         csrfHeader: []
@@ -915,6 +1030,7 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+      x-permission: category:delete
   /api/tags:
     get:
       tags:
@@ -932,6 +1048,18 @@ paths:
           type: string
       - $ref: '#/components/parameters/Page'
       - $ref: '#/components/parameters/PageSize'
+      - name: sort
+        in: query
+        style: form
+        explode: true
+        schema:
+          type: array
+          items:
+            type: string
+            pattern: ^(name|created_at),(asc|desc)$
+          default:
+          - name,asc
+        description: 多字段排序，可重复，按出现顺序生效；末尾固定追加 id（v2.6，BR-SEARCH-007）。
       responses:
         '200':
           description: 成功
@@ -955,6 +1083,7 @@ paths:
                               $ref: '#/components/schemas/Tag'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+      x-permission: tag:read
     post:
       tags:
       - TAX
@@ -993,6 +1122,7 @@ paths:
           $ref: '#/components/responses/CsrfInvalid'
         '409':
           $ref: '#/components/responses/Conflict'
+      x-permission: tag:create
   /api/tags/{id}:
     parameters:
     - $ref: '#/components/parameters/TaxId'
@@ -1036,6 +1166,7 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+      x-permission: tag:update
     delete:
       tags:
       - TAX
@@ -1043,7 +1174,11 @@ paths:
       description: '编辑与管理员均可，不限创建人；被引用 → 409。
 
 
-        覆盖需求：FR-TAX-002、BR-TAX-004'
+        覆盖需求：FR-TAX-002、BR-TAX-004
+
+
+
+        v2.6：逻辑删除，删除后名称可重新使用。'
       security:
       - sessionCookie: []
         csrfHeader: []
@@ -1070,6 +1205,7 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+      x-permission: tag:delete
   /api/articles/{id}/media:
     parameters:
     - $ref: '#/components/parameters/ArticleId'
@@ -1080,7 +1216,11 @@ paths:
       description: '仅归属编辑，状态为草稿/驳回/已下架。按文件签名判定真实格式；图片 jpg/jpeg/png/gif/webp ≤5MB，音频 mp3/m4a/wav/ogg ≤20MB。上传后未关联，需通过编辑文章关联。
 
 
-        覆盖需求：FR-MEDIA-001、BR-MEDIA-002、BR-MEDIA-005、BR-MEDIA-008'
+        覆盖需求：FR-MEDIA-001、BR-MEDIA-002、BR-MEDIA-005、BR-MEDIA-008
+
+
+
+        v2.6：保存并返回 original_name、download_url。'
       security:
       - sessionCookie: []
         csrfHeader: []
@@ -1122,6 +1262,7 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+      x-permission: media:upload
   /api/media/{media_id}:
     get:
       tags:
@@ -1130,7 +1271,11 @@ paths:
       description: '唯一媒体出口，匿名可达（可携带会话）。已发布文章的当前引用可匿名读；其余仅归属编辑/管理员可读；失去引用的文件任何人不可读。任何拒绝一律 404，不返回 401/403/409。Cache-Control: no-store。
 
 
-        覆盖需求：FR-MEDIA-002、BR-MEDIA-003'
+        覆盖需求：FR-MEDIA-002、BR-MEDIA-003
+
+
+
+        v2.6：Content-Disposition: inline；下载见 #43（判权完全相同）。'
       security: []
       operationId: getMediaFile
       parameters:
@@ -1156,6 +1301,7 @@ paths:
           description: 音频 Range 请求的部分内容【补充】
         '404':
           $ref: '#/components/responses/NotFound'
+      x-permission: anonymous
   /api/public/articles:
     get:
       tags:
@@ -1164,7 +1310,11 @@ paths:
       description: '仅返回已发布文章的白名单字段；未知参数（如 status）忽略。按 published_at 降序。可按关键字 q 匹配标题或摘要（范围延伸）。with_facets=true 时附带全部已发布文章引用的分类与标签（不受筛选影响）。
 
 
-        覆盖需求：FR-PUBLIC-001、BR-ISO-004、BR-SEARCH-005、BR-TAX-003'
+        覆盖需求：FR-PUBLIC-001、BR-ISO-004、BR-SEARCH-005、BR-TAX-003
+
+
+
+        v2.6：一级分类筛选含子分类；facets.categories 只含启用分类；文章自身分类即使已停用也照常返回。'
       security: []
       operationId: listPublicArticles
       parameters:
@@ -1184,6 +1334,18 @@ paths:
           type: boolean
           default: false
         description: 【补充】为 true 时返回 data.facets
+      - name: sort
+        in: query
+        style: form
+        explode: true
+        schema:
+          type: array
+          items:
+            type: string
+            pattern: ^(published_at),(asc|desc)$
+          default:
+          - published_at,desc
+        description: 多字段排序，可重复，按出现顺序生效；末尾固定追加 id（v2.6，BR-SEARCH-007）。公开列表只允许按 published_at 排序。
       responses:
         '200':
           description: 成功
@@ -1198,6 +1360,7 @@ paths:
                       $ref: '#/components/schemas/PublicArticlePage'
         '400':
           $ref: '#/components/responses/BadRequest'
+      x-permission: anonymous
   /api/public/articles/{id}:
     parameters:
     - $ref: '#/components/parameters/ArticleId'
@@ -1223,6 +1386,553 @@ paths:
                   properties:
                     data:
                       $ref: '#/components/schemas/PublicArticleDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      x-permission: anonymous
+  /api/admin/users:
+    get:
+      tags:
+      - USER
+      summary: '#33 用户列表'
+      description: '分页；keyword 登录名模糊匹配；按角色、状态筛选；编辑调用 404。
+
+
+
+        覆盖需求：FR-USER-006、BR-SEARCH-007'
+      operationId: listUsers
+      x-permission: user:read
+      parameters:
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PageSize'
+      - name: keyword
+        in: query
+        schema:
+          type: string
+          maxLength: 32
+      - name: role
+        in: query
+        schema:
+          $ref: '#/components/schemas/Role'
+      - name: status
+        in: query
+        schema:
+          $ref: '#/components/schemas/AccountStatus'
+      - name: sort
+        in: query
+        style: form
+        explode: true
+        schema:
+          type: array
+          items:
+            type: string
+            pattern: ^(created_at|username),(asc|desc)$
+          default:
+          - created_at,desc
+        description: 多字段排序，可重复，按出现顺序生效；末尾固定追加 id（v2.6，BR-SEARCH-007）。
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      allOf:
+                      - $ref: '#/components/schemas/PageMeta'
+                      - type: object
+                        required:
+                        - items
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/admin/users/{id}/status:
+    parameters:
+    - $ref: '#/components/parameters/UserId'
+    put:
+      tags:
+      - USER
+      summary: '#34 启用 / 停用账号'
+      description: '不能操作自己；停用后至少保留一个启用管理员，否则 409 40909。被停用账号的会话在下一次请求 401。
+
+
+
+        覆盖需求：FR-USER-003、BR-USER-001~002、BR-ROLE-004'
+      operationId: updateUserStatus
+      x-permission: user:status
+      security:
+      - sessionCookie: []
+        csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserStatusRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CsrfInvalid'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/admin/users/{id}/role:
+    parameters:
+    - $ref: '#/components/parameters/UserId'
+    put:
+      tags:
+      - USER
+      summary: '#35 分配角色'
+      description: '名下有文章（含已逻辑删除）的编辑不能升为管理员（409 40910）；不能操作自己、降级后至少保留一个启用管理员（409 40909）。新角色在被操作账号的下一次请求生效。
+
+
+
+        覆盖需求：FR-USER-002、BR-ROLE-004~005、BR-RBAC-005'
+      operationId: assignUserRole
+      x-permission: user:assign-role
+      security:
+      - sessionCookie: []
+        csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserRoleRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CsrfInvalid'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/roles:
+    get:
+      tags:
+      - USER
+      summary: '#36 角色及其权限点（只读）'
+      description: '只读；本期不提供修改角色权限的接口（BR-RBAC-002）。
+
+
+
+        覆盖需求：FR-USER-007'
+      operationId: listRoles
+      x-permission: role:read
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/RoleDetail'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/permissions:
+    get:
+      tags:
+      - USER
+      summary: '#37 权限点清单'
+      description: '27 个权限点，按 module、code 排序。
+
+
+
+        覆盖需求：FR-USER-007、BR-RBAC-002'
+      operationId: listPermissions
+      x-permission: role:read
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Permission'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/categories/{id}/status:
+    parameters:
+    - $ref: '#/components/parameters/TaxId'
+    put:
+      tags:
+      - TAX
+      summary: '#38 分类启停'
+      description: '不受引用保护限制；停用后不能被文章选用（40015），已发布文章照常公开（BR-TAX-008）。
+
+
+
+        覆盖需求：FR-TAX-005'
+      operationId: updateCategoryStatus
+      x-permission: category:update
+      security:
+      - sessionCookie: []
+        csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryStatusRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/Category'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CsrfInvalid'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/categories/sort:
+    put:
+      tags:
+      - TAX
+      summary: '#39 同级批量排序（单事务）'
+      description: 'items 必须都是 parent_id 下未删除的分类；任一条不合法则整批不生效。
+
+
+
+        覆盖需求：FR-TAX-006、BR-TAX-007'
+      operationId: sortCategories
+      x-permission: category:update
+      security:
+      - sessionCookie: []
+        csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategorySortRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Category'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CsrfInvalid'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/reviews/batch-approve:
+    post:
+      tags:
+      - REVIEW
+      summary: '#40 批量审核通过'
+      description: '逐条独立事务，逐条执行 #16 的完整规则（含轮次校验与留痕）；不提供批量驳回。条目 1~50，超出 400 40017。
+
+
+
+        覆盖需求：FR-REVIEW-005、BR-BATCH-001~005'
+      operationId: batchApprove
+      x-permission: review:approve
+      security:
+      - sessionCookie: []
+        csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchApproveRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/BatchResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CsrfInvalid'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/reviews/batch-unpublish:
+    post:
+      tags:
+      - REVIEW
+      summary: '#41 批量下架'
+      description: '逐条独立事务，共用一个下架原因。
+
+
+
+        覆盖需求：FR-REVIEW-006、BR-BATCH-001~004'
+      operationId: batchUnpublish
+      x-permission: review:unpublish
+      security:
+      - sessionCookie: []
+        csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchUnpublishRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/BatchResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CsrfInvalid'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/articles/batch-delete:
+    post:
+      tags:
+      - ARTICLE
+      summary: '#42 批量删除草稿'
+      description: '逐条独立事务，逐条执行 #10（逻辑删除）；他人草稿与不存在都返回 40400。管理员调用 404。
+
+
+
+        覆盖需求：FR-ARTICLE-007、BR-BATCH-001~004、BR-DEL-001~008'
+      operationId: batchDeleteArticles
+      x-permission: article:delete
+      security:
+      - sessionCookie: []
+        csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchDeleteRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/BatchResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/CsrfInvalid'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/media/{media_id}/download:
+    get:
+      tags:
+      - MEDIA
+      summary: '#43 媒体下载（附件）'
+      description: '判权与 #29 完全相同，任何拒绝一律 404。Content-Disposition: attachment，文件名为上传时的原始文件名（RFC 5987 filename*=UTF-8）；流式输出；Cache-Control: no-store。实验二上传下载的延续。
+
+
+
+        覆盖需求：FR-MEDIA-005、BR-MEDIA-003'
+      security: []
+      operationId: downloadMediaFile
+      parameters:
+      - name: media_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '200':
+          description: 文件字节流（附件）
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              example: attachment; filename="5001.png"; filename*=UTF-8''%E6%9E%B6%E6%9E%84%E5%9B%BE.png
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+            image/*:
+              schema:
+                type: string
+                format: binary
+            audio/*:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
+      x-permission: anonymous
+  /api/admin/operation-logs:
+    get:
+      tags:
+      - OPLOG
+      summary: '#44 系统操作日志'
+      description: '只读；与 #19 文章留痕是两张表。不提供修改或删除日志的接口。
+
+
+
+        覆盖需求：FR-OPLOG-002、BR-OPLOG-005'
+      operationId: listOperationLogs
+      x-permission: oplog:read
+      parameters:
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PageSize'
+      - name: operator_id
+        in: query
+        schema:
+          type: integer
+          format: int64
+      - name: module
+        in: query
+        schema:
+          $ref: '#/components/schemas/OplogModule'
+      - name: success
+        in: query
+        schema:
+          type: boolean
+      - name: from
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: to
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: sort
+        in: query
+        style: form
+        explode: true
+        schema:
+          type: array
+          items:
+            type: string
+            pattern: ^(created_at),(asc|desc)$
+          default:
+          - created_at,desc
+        description: 多字段排序，可重复，按出现顺序生效；末尾固定追加 id（v2.6，BR-SEARCH-007）。
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      allOf:
+                      - $ref: '#/components/schemas/PageMeta'
+                      - type: object
+                        required:
+                        - items
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/OperationLog'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
         '404':
           $ref: '#/components/responses/NotFound'
 components:
@@ -1290,13 +2000,29 @@ components:
       in: query
       schema:
         type: string
-      description: 标题模糊匹配
+      description: v0.1 旧参数，v2.6 起为 keyword 的别名（匹配标题或摘要）；前端改用 keyword 后删除
+      deprecated: true
     AuthorFilter:
       name: author_id
       in: query
       schema:
         type: integer
         format: int64
+    KeywordFilter:
+      name: keyword
+      in: query
+      schema:
+        type: string
+        maxLength: 100
+      description: 关键字，匹配标题或摘要（v2.6，BR-SEARCH-001）
+    UserId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+      description: 账号 ID
   responses:
     BadRequest:
       description: 请求参数或请求体不合法（code 400xx）
@@ -1393,6 +2119,10 @@ components:
           - 40012
           - 40013
           - 40014
+          - 40015
+          - 40016
+          - 40017
+          - 40018
           - 40100
           - 40101
           - 40300
@@ -1405,6 +2135,9 @@ components:
           - 40905
           - 40906
           - 40907
+          - 40908
+          - 40909
+          - 40910
           - 50000
         message:
           type: string
@@ -1510,7 +2243,10 @@ components:
       - id
       - username
       - role
+      - role_name
+      - status
       - created_at
+      - updated_at
       properties:
         id:
           type: integer
@@ -1520,7 +2256,15 @@ components:
           example: editor_01
         role:
           $ref: '#/components/schemas/Role'
+        role_name:
+          type: string
+          example: 内容编辑
+        status:
+          $ref: '#/components/schemas/AccountStatus'
         created_at:
+          type: string
+          format: date-time
+        updated_at:
           type: string
           format: date-time
     UserBrief:
@@ -1555,6 +2299,9 @@ components:
       required:
       - id
       - name
+      - parent_id
+      - sort_order
+      - status
       - in_use
       - created_at
       - updated_at
@@ -1566,14 +2313,30 @@ components:
           type: string
           minLength: 1
           maxLength: 50
+        parent_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: 一级分类为 null（v2.6）
+        sort_order:
+          type: integer
+          description: 同级升序（v2.6）
+        status:
+          $ref: '#/components/schemas/CategoryStatus'
         in_use:
           type: boolean
+          description: 是否被未删除文章引用
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/Category'
+          description: '仅 #20 树形响应中出现；二级分类为空数组（v2.6）'
     Tag:
       type: object
       required:
@@ -1645,8 +2408,10 @@ components:
       - article_id
       - usage
       - url
+      - download_url
       - mime_type
       - size
+      - original_name
       - linked
       - created_at
       properties:
@@ -1660,11 +2425,19 @@ components:
           $ref: '#/components/schemas/MediaUsage'
         url:
           type: string
+        download_url:
+          type: string
+          example: /api/media/5001/download
+          description: v2.6
         mime_type:
           type: string
         size:
           type: integer
           format: int64
+        original_name:
+          type: string
+          maxLength: 255
+          description: '上传时的原始文件名，下载 #43 用（v2.6）'
         linked:
           type: boolean
         created_at:
@@ -2285,6 +3058,7 @@ components:
             - $ref: '#/components/schemas/PublicFacets'
             nullable: true
             description: with_facets=true 时返回，否则为 null
+            type: object
     PublicArticleDetail:
       allOf:
       - $ref: '#/components/schemas/PublicArticleListItem'
@@ -2298,3 +3072,357 @@ components:
           audio_url:
             type: string
             nullable: true
+    AccountStatus:
+      type: string
+      enum:
+      - ENABLED
+      - DISABLED
+      description: 账号状态（v2.6，BR-USER-001）
+    CategoryStatus:
+      type: string
+      enum:
+      - ENABLED
+      - DISABLED
+      description: 分类状态（v2.6，BR-TAX-008）
+    PermissionCode:
+      type: string
+      enum:
+      - article:create
+      - article:update
+      - article:delete
+      - article:submit
+      - article:withdraw
+      - article:reschedule
+      - article:read
+      - article:read:all
+      - review:queue
+      - review:approve
+      - review:reject
+      - review:unpublish
+      - audit:read
+      - category:read
+      - category:create
+      - category:update
+      - category:delete
+      - tag:read
+      - tag:create
+      - tag:update
+      - tag:delete
+      - media:upload
+      - user:read
+      - user:status
+      - user:assign-role
+      - role:read
+      - oplog:read
+      description: 权限点（v2.6，SRS §4.7，27 个）
+    OplogModule:
+      type: string
+      enum:
+      - AUTH
+      - ARTICLE
+      - REVIEW
+      - TAX
+      - MEDIA
+      - USER
+      description: 操作日志模块（v2.6）
+    CurrentUser:
+      allOf:
+      - $ref: '#/components/schemas/User'
+      - type: object
+        required:
+        - permissions
+        properties:
+          permissions:
+            type: array
+            items:
+              $ref: '#/components/schemas/PermissionCode'
+            description: 当前角色持有的权限点，按代码升序；前端据此显示菜单（FR-AUTH-005）
+    RoleDetail:
+      type: object
+      required:
+      - code
+      - name
+      - permissions
+      properties:
+        code:
+          $ref: '#/components/schemas/Role'
+        name:
+          type: string
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PermissionCode'
+    Permission:
+      type: object
+      required:
+      - code
+      - name
+      - module
+      properties:
+        code:
+          $ref: '#/components/schemas/PermissionCode'
+        name:
+          type: string
+        module:
+          type: string
+          enum:
+          - ARTICLE
+          - REVIEW
+          - AUDIT
+          - TAX
+          - MEDIA
+          - USER
+          - OPLOG
+    UserStatusRequest:
+      type: object
+      required:
+      - status
+      additionalProperties: false
+      properties:
+        status:
+          $ref: '#/components/schemas/AccountStatus'
+    UserRoleRequest:
+      type: object
+      required:
+      - role_code
+      additionalProperties: false
+      properties:
+        role_code:
+          $ref: '#/components/schemas/Role'
+    CategoryCreateRequest:
+      type: object
+      required:
+      - name
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 50
+        parent_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: 只能是未删除的一级分类
+        sort_order:
+          type: integer
+          default: 0
+    CategoryUpdateRequest:
+      type: object
+      required:
+      - name
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 50
+        parent_id:
+          type: integer
+          format: int64
+          nullable: true
+    CategoryStatusRequest:
+      type: object
+      required:
+      - status
+      additionalProperties: false
+      properties:
+        status:
+          $ref: '#/components/schemas/CategoryStatus'
+    CategorySortRequest:
+      type: object
+      required:
+      - parent_id
+      - items
+      additionalProperties: false
+      properties:
+        parent_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: null 表示一级分类
+        items:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: object
+            required:
+            - id
+            - sort_order
+            properties:
+              id:
+                type: integer
+                format: int64
+              sort_order:
+                type: integer
+    OperationLog:
+      type: object
+      required:
+      - id
+      - operator
+      - module
+      - operation
+      - target_type
+      - target_id
+      - http_method
+      - request_uri
+      - client_ip
+      - success
+      - error_code
+      - duration_ms
+      - created_at
+      properties:
+        id:
+          type: integer
+          format: int64
+        operator:
+          allOf:
+          - $ref: '#/components/schemas/UserBrief'
+          nullable: true
+          type: object
+        module:
+          $ref: '#/components/schemas/OplogModule'
+        operation:
+          type: string
+          example: ARTICLE_DELETE
+        target_type:
+          type: string
+          nullable: true
+        target_id:
+          type: integer
+          format: int64
+          nullable: true
+        http_method:
+          type: string
+          enum:
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+        request_uri:
+          type: string
+        client_ip:
+          type: string
+        success:
+          type: boolean
+        error_code:
+          type: integer
+          nullable: true
+        duration_ms:
+          type: integer
+          minimum: 0
+        created_at:
+          type: string
+          format: date-time
+      description: 不含请求体、密码、登录失败时尝试的登录名（BR-OPLOG-003）
+    BatchItemResult:
+      type: object
+      required:
+      - id
+      - success
+      - code
+      - message
+      properties:
+        id:
+          type: integer
+          format: int64
+        success:
+          type: boolean
+        code:
+          type: integer
+          description: 0 成功；失败码与单条接口一致，不存在与无权都是 40400
+        message:
+          type: string
+    BatchResult:
+      type: object
+      required:
+      - total
+      - succeeded
+      - failed
+      - results
+      properties:
+        total:
+          type: integer
+        succeeded:
+          type: integer
+        failed:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/BatchItemResult'
+      example:
+        total: 2
+        succeeded: 1
+        failed: 1
+        results:
+        - id: 101
+          success: true
+          code: 0
+          message: OK
+        - id: 999
+          success: false
+          code: 40400
+          message: 资源不存在
+    BatchApproveRequest:
+      type: object
+      required:
+      - items
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: object
+            required:
+            - article_id
+            - submission_id
+            properties:
+              article_id:
+                type: integer
+                format: int64
+              submission_id:
+                type: integer
+                format: int64
+                description: 该篇管理员实际查看的提交轮次（BR-BATCH-005）
+    BatchUnpublishRequest:
+      type: object
+      required:
+      - article_ids
+      - reason
+      additionalProperties: false
+      properties:
+        article_ids:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items:
+            type: integer
+            format: int64
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+    BatchDeleteRequest:
+      type: object
+      required:
+      - article_ids
+      - confirm
+      additionalProperties: false
+      properties:
+        article_ids:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items:
+            type: integer
+            format: int64
+        confirm:
+          type: boolean
+          enum:
+          - true
