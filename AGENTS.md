@@ -10,7 +10,7 @@
 - 一个 8 人团队的课程项目：**技术博客内容管理系统（CMS）**，前后端分离的单体应用。
 - 角色只有两个：**内容编辑**（写自己的文章、提交审核）与**管理员**（审核、下架、管理分类）。博客前台匿名只读。
 - 核心卖点是**权限模型可被测试证明**：三道闸门（角色 / 归属 / 状态）、归属隔离、媒体单一出口、留痕只增不改。
-- 当前阶段：**设计已完成，尚未进入实现**。`src/`、`web/` 还不存在，`pom.xml` 只有 Java 21 编译配置，没有依赖。
+- 当前阶段：**设计已完成，后端即将进入 M0**。`web/` 已有博客前台与管理员后台（契约 mock 供数）；`src/` 还没有后端代码，`pom.xml` 只有 Java 21 编译配置，没有依赖。表结构已定稿（`doc/db/schema.md`），分工见 `doc/context/team-division.md`。
 
 ## 2 文档地图与优先级
 
@@ -19,7 +19,9 @@
 | 1 | `CMS-SRS.md` | **唯一需求真源**（v2.5，已冻结）。业务规则 `BR-*`、功能需求 `FR-*`、横切需求 `X-*`、测试用例 `TU-*` 都以它为准 |
 | 2 | `doc/api/api-spec.md` + `doc/api/openapi.yaml` | 前后端统一接口规范（草案 v0.1）。路径、字段、错误码、分页以它为准；两者冲突时以 `api-spec.md` 为准 |
 | 3 | `doc/context/architecture.md` | 内部架构基线：技术栈、包结构、不变量 `INV-*`、后台任务 |
+| 3 | `doc/db/schema.md` | 12 张表的字段、约束、范式论证与 Flyway 顺序；architecture §4.1 的展开。写迁移、Entity、Mapper 以它为准 |
 | 4 | `doc/context/git-standards.md` | 提交、分支、合并规范（提交行为以它为准） |
+| 5 | `doc/context/team-division.md` | 分工、表所有权、任务细分与 PR 审核人 |
 | 5 | `doc/context/progress-tracker.md` | 当前状态快照与决策记录 |
 | 参考 | `doc/context/project-overview.md` | 背景与取舍记录，**已降级，不定义规则** |
 
@@ -32,7 +34,7 @@
 
 - **前端**：Vue 3（Composition API）+ Vite、Element Plus、Pinia、Vue Router、Axios；Markdown 编辑建议 `md-editor-v3`。
 - **后端**：Java 21、Spring Boot 3.x（**Spring MVC**，不用 WebFlux）、Spring Security 6（**只做认证**）、MyBatis-Plus（不用 JPA）、MySQL 8（`utf8mb4`）、Flyway、Spring `@Scheduled`。
-- **测试**：JUnit 5、Spring Boot Test、MockMvc、Testcontainers（**真 MySQL，不用 H2**）。
+- **测试**：JUnit 5、Spring Boot Test、MockMvc、Testcontainers（**真 MySQL，不用 H2**）。**2026-11-23 起后端测试暂缓到 M5**（`team-division.md` §3.7），选型不变。
 - **构建与部署**：Maven 单模块；前端静态产物 + 后端 jar，置于 Nginx 同源反向代理之后。
 - **明确不引入**：Redis 或任何缓存、消息队列、Quartz、JWT、独立检索服务。要引入任何新依赖或新中间件，先问人。
 
@@ -42,6 +44,11 @@
 `config/ auth/ security/ article/ taxonomy/ media/ audit/ publicapi/ task/ common/`
 每个包的职责与禁止事项见 `architecture.md` §3.1。依赖方向：
 - `common` 不依赖任何业务包；`security` **不得反向依赖**业务包；`publicapi` 不被任何后台包依赖。
+
+数据库：
+- 表、字段、约束以 `doc/db/schema.md` 为准；迁移按其 §8 的 V1～V9 顺序，每张表只由所有者改（`team-division.md` §1.3）。
+- 枚举在库里与接口里是**同一套英文代码**，用 MyBatis-Plus `@EnumValue` 直接映射，不做中英映射。
+- schema §6 列出的服务层规则（AUD-01～08、USER-01、TAX-01、MEDIA-01～03、ART-01）数据库不会替你挡，必须在对应 Service 里校验。
 
 前端目录 `web/src/{api,router,stores,views,components,utils}`，见 `architecture.md` §3.2。
 - `views/article` 与 `views/review` **不共享可写组件**；审核页不得出现正文编辑控件（BR-007）。
@@ -57,7 +64,7 @@
 4. **留痕只增**：`audit/` 包里不写 update / delete 方法；应用数据库账号只有 `INSERT`/`SELECT`（INV-04）。
 5. **媒体单一出口**：所有文件只经 `GET /api/media/{media_id}` 判权后由应用读盘返回；`storage/` 不得出现在任何静态资源映射里（INV-05）。
 6. **正文只存 Markdown 原文**：后端不渲染、不消毒、不接受 HTML / 脚本 / iframe；视频只存 `https` URL（INV-06）。
-7. **系统字段只由系统写**：`published_at`、`author_id`、`status`、时间戳不出现在任何请求 DTO 里；请求带了直接 400（INV-07、INV-08）。
+7. **系统字段只由系统写**：`published_at`、`author_id`、`status`、`version`、时间戳不出现在任何请求 DTO 里；请求带了直接 400（INV-07、INV-08）。编辑文章用 `expected_version` 做乐观锁，不一致返回 `409 40907`。
 8. **拒绝不泄露存在性**：角色闸、归属闸失败返回 404，响应体与「资源不存在」逐字节一致；媒体出口任何拒绝都是 404；401 只用于未登录（INV-09）。具体判定顺序与错误码见 `api-spec.md` §3。
 9. **公开接口只读且只给已发布**：`publicapi/` 只有 SELECT，不接受任何影响可见性的参数（INV-10）。
 10. **不加缓存**：任何缓存都会破坏「下架后媒体立即不可访问」（BR-MEDIA-003）。
@@ -76,7 +83,7 @@
 
 1. **先读后写**：改动前先读相关 SRS 条目、`api-spec.md` 对应接口和 `architecture.md` 对应小节。
 2. **小步提交**：一次只做一件事；文档改动与代码改动分开提交。
-3. **测试先行于权限代码**：涉及闸门、归属、媒体判权、状态迁移的改动，必须同时补 `TU-*` 对应的接口级测试（MockMvc + Testcontainers）。越权用例直接打接口，不经过前端。
+3. **权限代码要留验证记录**：涉及闸门、归属、媒体判权、状态迁移的改动，PR 里必须附手工验证记录（curl 或 Apifox，至少包含一次「编辑 B 访问编辑 A 的文章返回 404」）。原先要求的 `TU-*` 接口级测试（MockMvc + Testcontainers）暂缓到 M5 统一补，代码要保持可测（时间源注入、`StorageService` 可替换）。
 4. **不编造需求**：SRS 没写的行为不要自己发明；确需补充的通用基础设施在文档中标注【补充】。
 5. **更新进度**：完成一项实质性工作后，同步更新 `doc/context/progress-tracker.md` 的对应小节（它是快照，不写流水账）。
 6. **不确定就问**：需求有歧义、文档冲突、要新增依赖、要改冻结文档、要改写已推送历史时，停下来问人。
