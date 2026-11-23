@@ -1,6 +1,8 @@
 # Git 提交与协作规范
 
-> 版本 v1.1 ｜ 2026-10-10 ｜ 适用范围：本仓库全部提交、分支与合并操作
+> 版本 v1.2 ｜ 2026-11-23 ｜ 适用范围：本仓库全部提交、分支与合并操作
+>
+> v1.2 变化（SRS v2.6，决策 D9）：后端 PR 改用 merge commit 保留逐次提交（§7）；PR 描述增加「AI 使用说明」（§7.1）；scope 增加 `api`、`team`、`ai-log`、`design`、`system`、`oplog`（§4）。
 >
 > 依据 **Conventional Commits 1.0.0**：<https://www.conventionalcommits.org/en/v1.0.0/>（[简体中文版](https://www.conventionalcommits.org/zh-hans/v1.0.0/)）
 
@@ -70,8 +72,8 @@ Refs: #12
 
 | 分类 | 取值 |
 |---|---|
-| 需求与文档 | `srs`、`overview`、`architecture`、`tracker`、`traceability`、`git` |
-| 后端功能域 | `auth`、`security`、`article`、`taxonomy`、`media`、`audit`、`publicapi`、`task`、`common`、`config`、`db` |
+| 需求与文档 | `srs`、`overview`、`architecture`、`api`、`team`、`tracker`、`traceability`、`git`、`ai-log`、`design`、`report` |
+| 后端功能域 | `auth`、`security`、`system`（用户管理）、`article`、`taxonomy`、`media`、`audit`、`oplog`（操作日志）、`publicapi`、`task`、`common`、`config`、`db` |
 | 前端 | `web` |
 | 构建与依赖 | `build`、`deps` |
 
@@ -91,6 +93,8 @@ Refs: #12
 1. `main` 是唯一长期分支，任何时刻都应可用。
 2. 工作分支命名 `<type>/<kebab-case 描述>`，如 `docs/git-standards`、`feat/article-submit`、`fix/audit-restrict`。
 3. 单人开发且改动集中时可直接提交 `main`；有他人同时改同一批文件、或改动跨多天未完成时，必须开分支。
+4. 后端开发一律开分支、走 PR（`doc/context/team-division.md` §3.2），**不得直接推 `main`**。
+5. 每人用自己的 git 身份（`user.name`/`user.email`）提交，不加 `Co-authored-by`；提交历史是课程要求的过程材料（`doc/ai-log/README.md`）。
 
 ## 6 还原提交（revert）
 
@@ -104,14 +108,42 @@ Refs: 3f2a1b9
 
 ## 7 合并与历史改写
 
-**保持线性历史**：合并用 `rebase` 或 `squash`，不产生 `Merge branch 'xxx'` 提交。
+**按 PR 类型选合并方式**（v1.2，决策 D9）：
+
+| PR 类型 | 合并方式 | 原因 |
+|---|---|---|
+| 后端代码（`src/**`、迁移、`pom.xml`） | **merge commit**（GitHub「Create a merge commit」），不 squash、不 rebase | 保留每个人的逐次提交，作为「保留修改痕迹」的过程材料；合并提交信息用默认的 `Merge pull request #N from …` |
+| 文档（`CMS-SRS.md`、`doc/**`）、前端（`web/**`） | `squash` 或 `rebase`，保持线性 | 这两类不计入个人代码过程材料，线性历史更易读 |
+
+因此 `main` 上会出现后端 PR 的合并提交，这是有意为之。PR 分支在审核期间只追加提交，**不强推**；合并后删除分支。
 
 | 状态 | 允许 | 禁止 |
 |---|---|---|
 | 未推送 | `git commit --amend` 改信息、`git rebase -i` 拆分/合并/改信息 | —— |
 | 已推送 | 用 `revert:` 提交撤销 | 改写历史；确需改写时必须 `--force-with-lease`（禁止裸 `--force`）并事先通知协作者 |
 
+**已推送的提交（包括 PR 分支上的）不得改写**：后端 PR 用 merge commit 合并后，分支上的每个提交都会进入 `main`。
+
 改写前先确认推送状态：`git status -sb` 的 `ahead N` 与 `git log origin/main -1`。改写后**不要在文档里写提交号**——哈希会作废，变成悬空引用。
+
+### 7.1 PR 描述模板
+
+```markdown
+## 做了什么
+- 接口 / 迁移 / 组件：#…（api-spec §…）
+- 涉及的表（W/w/R）：…
+- 对应的 BR / FR / INV：…
+
+## 手工验证
+- 成功：…
+- 400 / 404 / 409 等典型分支：…（curl 或 Apifox 的请求与响应摘要）
+
+## AI 使用说明
+- 是否使用 AI：是 / 否
+- 用在哪：（配置、通用片段、接口模板、报错解释……）
+- 对应记录：`doc/ai-log/<成员>/YYYY-MM-DD-<主题>.md`
+- 自己改了哪些、怎么验证的：…
+```
 
 ## 8 换行符
 
@@ -158,5 +190,7 @@ echo "export default { extends: ['@commitlint/config-conventional'] };" > commit
 | `doc/context/architecture.md` | 内部架构基线；决策变更需同步 progress-tracker |
 | `doc/context/project-overview.md` | 背景与取舍记录（已降级，不再是规则真源） |
 | `doc/design/traceability-check.py` | 追溯性校验脚本，目前已暂停使用 |
+| `doc/context/team-division.md` | 分支、PR、审核人与合并执行人的具体分工 |
+| `doc/ai-log/README.md` | AI 使用与过程记录规则；PR 模板的「AI 使用说明」指向它 |
 
 与本文件冲突时：提交与分支行为以本文件为准，需求取值以 `CMS-SRS.md` 为准。

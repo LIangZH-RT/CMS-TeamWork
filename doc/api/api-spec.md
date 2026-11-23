@@ -1,12 +1,14 @@
-# CMS-TeamWork 前后端统一接口规范（草案 v0.1）
+# CMS-TeamWork 前后端统一接口规范（草案 v0.2，对应 SRS v2.6）
 
 | 项 | 内容 |
 |---|---|
-| 依据 | `CMS-SRS.md` v2.5（需求基线冻结版，唯一需求真源）；`doc/context/architecture.md`（内部架构基线，路径与认证约定） |
-| 编制基线 | SRS v2.5 冻结版 |
+| 依据 | `CMS-SRS.md` v2.6（需求基线，唯一需求真源）；`doc/context/architecture.md`（内部架构基线，路径与认证约定） |
+| 编制基线 | SRS v2.6（v0.1 基于 v2.5） |
 | 配套文件 | `doc/api/openapi.yaml`（OpenAPI 3.0.3，与本文一致；冲突时以本文为准） |
+| 数据库规格 | `doc/db/schema.md`（v2，16 张表的字段与约束；§16-#2/#3/#7/#11/#14 的落点，2026-11-23） |
 | 文档性质 | 供评审的接口设计草案（待团队确认后定版） |
-| 编制日期 | 2026-11-15 |
+| 编制日期 | 2026-11-15（v0.1）；2026-11-23（v0.2） |
+| v0.2 变更 | 32 → **44 个接口**（#33～#44 顺延，不重排旧编号）；11 处已有接口改参数或语义（见 §17）；新增 7 个错误码（40015～40018、40908～40910）；新增 §3.4 接口 → 权限点对照 |
 
 > 阅读约定：
 > - 每个接口标注「覆盖需求」，对应 SRS 的 `FR-*`、`BR-*`、`X-*`、`TU-*` 编号。
@@ -33,6 +35,7 @@
 14. 需求追溯表
 15. 与现有文档的冲突
 16. 待确认问题
+17. v0.2（SRS v2.6）改动清单
 
 ---
 
@@ -47,7 +50,7 @@
 | 后台业务接口 | `/api/**` | 需要有效会话（下列匿名入口除外） | 编辑、管理员共用同一套路径，服务端按角色和归属判定 |
 | 匿名入口 | `/api/auth/login`、`/api/auth/register`、`/api/auth/csrf` | 不需要 | FR-AUTH-004 列明的匿名入口 |
 | 博客前台公开接口 | `/api/public/**` | 不需要 | 只读，强制只返回「已发布」 |
-| 媒体出口 | `/api/media/{media_id}` | 不需要（可带会话） | 唯一的媒体文件出口，拒绝一律 404 |
+| 媒体出口 | `/api/media/{media_id}`、`/api/media/{media_id}/download` | 不需要（可带会话） | 媒体文件出口（在线访问 / 下载，共用同一判权），拒绝一律 404 |
 
 部署假设：前端和后端同源，由 Nginx 反向代理 `/api/**`（architecture §1、§9.3）。
 
@@ -59,7 +62,7 @@
 - ID 用 64 位整数（JSON number）。
 - 布尔值用 `true` / `false`，不用 0/1。
 - **空值语义**：SRS 规定「不存在」的字段一律返回 `null`，不得返回空字符串或占位值（6.6、7.2）。集合为空时返回 `[]`。
-- **未知字段**：写接口收到未定义的字段，或收到系统字段（`status`、`author_id`、`published_at`、`created_at`、`updated_at`、`submitted_at`、`id`）时，一律返回 `400 FIELD_NOT_WRITABLE`，状态和数据都不变。这满足 TU-13 允许的「400 或忽略」中的 400 这一支，比忽略更容易测。【补充：选择 400】
+- **未知字段**：写接口收到未定义的字段时，一律返回 `400 FIELD_NOT_WRITABLE`，状态和数据都不变。**文章写接口**（#7 创建、#9 编辑）收到文章的系统字段（`status`、`author_id`、`published_at`、`created_at`、`updated_at`、`submitted_at`、`version`、`id`）时同样返回 `400 FIELD_NOT_WRITABLE`。系统字段的限制**只针对文章资源**：`status` 在 #34 账号启停、#38 分类启停的请求体里是定义好的可写字段，不受此限（v2.6 修订）。这满足 TU-13 允许的「400 或忽略」中的 400 这一支，比忽略更容易测。【补充：选择 400】
 - **公开接口例外**：公开接口收到未知查询参数（如 `status=DRAFT`）时**忽略**，不报错，也不改变结果集（architecture INV-10、FR-PUBLIC-001 验收③）。
 
 ### 1.3 时间格式
@@ -161,7 +164,7 @@
 
 | 项 | 取值 |
 |---|---|
-| 令牌存储 | 会话绑定（`HttpSessionCsrfTokenRepository`，architecture §5.1、§15 冲突 6）：令牌保存在服务端会话中，**不下发可读的 CSRF Cookie** |
+| 令牌存储 | 会话绑定（v2.6 修订：由自定义的 `CsrfInterceptor` 校验，不用 Spring Security；architecture §5.1、§15 冲突 6）：令牌保存在服务端会话中，**不下发可读的 CSRF Cookie** |
 | 令牌下发 | 只通过 `GET /api/auth/csrf`（#1）的响应体 `data.token` 返回；匿名访问会建立匿名会话以绑定令牌（用于注册） |
 | 令牌回传 | 请求头 `X-XSRF-TOKEN: <token>` |
 | 需要 CSRF 的请求 | **除登录外**所有改变状态的请求（POST / PUT / DELETE），包括登出、注册 |
@@ -177,7 +180,7 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 ```
 1. 认证            未登录或会话失效        → 401 UNAUTHENTICATED
 2. CSRF            令牌缺失或不匹配        → 403 CSRF_INVALID
-3. 角色闸 + 归属闸  无权限或不是你的资源    → 404 NOT_FOUND（统一响应体）
+3. 权限闸 + 归属闸  无权限或不是你的资源    → 404 NOT_FOUND（统一响应体）
 4. 请求格式校验     参数或请求体不合法      → 400 xxx
 5. 状态闸 / 业务前提 状态不允许、轮次不符、被引用等 → 409 xxx
 6. 依赖存储数据的内容校验（如提交时必填内容缺失） → 400 xxx
@@ -186,6 +189,8 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 - 第 3 步在第 4 步之前：这样非归属者无论发什么请求体都只拿到 404，不会因为 400 而得知资源存在。
 - FR-ARTICLE-005 写明「先校验角色与归属，再校验状态、留痕及二次确认」，因此删除接口的二次确认（400）放在状态与留痕判定（409）之后，作为第 6 步。
 - 匿名入口（登录、注册）没有第 1、3 步；媒体出口所有拒绝都是 404（§3.2）。
+- 第 1、2 步由 Spring MVC 拦截器（`AuthInterceptor`、`CsrfInterceptor`）完成，拦截器在参数绑定之前执行，所以 401、403 一定先于任何 400（v2.6 修订，architecture §5.1）。
+- **v2.6 注意（待 A 确认，§16-#17）**：权限闸改为 Controller 方法上的 AOP 切面后，Spring MVC 会在调用 Controller 代理**之前**完成参数绑定、JSON 解析与 `@Valid` 校验，所以"请求体格式错误"的 400 可能先于权限闸 / 归属闸的 404 返回。格式校验与资源是否存在无关，不泄露存在性；但它改变了上面第 3、4 步的先后。暂定处理：接受"格式 400 → 权限闸 404 → 归属闸 404 → 状态 409 → 内容 400"的新顺序，越权用例（TU-11 等）一律使用格式合法的请求体。
 
 ---
 
@@ -196,25 +201,26 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | 角色 | 枚举值 | 来源 |
 |---|---|---|
 | 内容编辑 | `EDITOR` | 注册入口直接注册，立即启用 |
-| 管理员 | `ADMIN` | 数据库初始化时创建，每库有且仅有一个，不开放注册 |
+| 管理员 | `ADMIN` | 初始管理员由数据库初始化创建，其余由角色分配（#35）产生；至少保留一个启用管理员；不开放注册 |
 
-一个账号只有一个角色（BR-ROLE-001）。管理员不写文章（BR-ROLE-002）。
+一个账号只有一个角色（BR-ROLE-001）。管理员不写文章（BR-ROLE-002）。角色持有的权限点见 SRS §4.7 与 §3.4。
 
 ### 3.2 三道闸门与统一 404
 
 依据：SRS §4.4、X-ISO-04、architecture INV-09。
 
-- **角色闸或归属闸失败一律返回 404**，响应体与「资源不存在」逐字节一致：
+- **权限闸（v2.6，原「角色闸」）或归属闸失败一律返回 404**，响应体与「资源不存在」逐字节一致：
 
 ```json
 { "code": 40400, "message": "资源不存在", "data": null }
 ```
 
 - 状态闸失败返回 409，因为能走到这一步的请求者本来就看得到这篇文章，不会泄露额外信息。
-- 编辑调用管理员接口（审核通过、驳回、下架、分类写操作）也返回同样的 404，不返回 403（§4.6 第 2、3 条，TU-11、TU-18）。
-- 管理员调用编辑专属接口（创建、编辑、删除、提交、撤回、改期、上传）同样返回 404（TU-12、§4.6 第 6、7 条）。
+- 编辑调用管理员接口（审核通过、驳回、下架、分类写操作、用户管理、角色权限查询、操作日志、批量审核与下架）也返回同样的 404，不返回 403（§4.6 第 2、3 条，TU-11、TU-18）。
+- 管理员调用编辑专属接口（创建、编辑、删除、批量删除、提交、撤回、改期、上传）同样返回 404（TU-12、§4.6 第 6、7 条）。
 - **媒体出口**的任何拒绝都是 404，**不返回 401**，也不返回 409（FR-MEDIA-002）。
-- 后台列表、筛选、计数接口**不触发 404**，只返回本人可见范围内的结果，没有结果时返回空列表和零计数（X-ISO-04）。
+- 后台列表、筛选、计数接口**不触发归属 404**，只返回本人可见范围内的结果，没有结果时返回空列表和零计数（X-ISO-04）；但角色不持有该列表的权限点时（如编辑调用 #33、#44）仍返回 404。
+- **批量接口**（#40～#42）整体返回 200，逐条结果里不存在与无权条目的 `code` 都是 `40400`，`message` 相同（BR-BATCH-004）。
 
 ### 3.3 错误码表
 
@@ -238,20 +244,62 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | 400 | 40012 | REASON_REQUIRED | 驳回意见或下架原因缺失、为空字符串或纯空格 | BR-AUDIT-003、TU-15 |
 | 400 | 40013 | CONFIRM_REQUIRED | 删除没有带二次确认标记 | BR-DEL-005 |
 | 400 | 40014 | ARTICLE_INCOMPLETE | 提交审核时必填内容（标题、正文、分类）缺失 | FR-SUBMIT-001 |
+| 400 | 40015 | CATEGORY_DISABLED | 新建或编辑文章时选用已停用的分类（含父分类已停用） | BR-TAX-008、§4.6 第 22 条 |
+| 400 | 40016 | CATEGORY_DEPTH_EXCEEDED | 父分类不是一级分类（会超过 2 级）、父分类就是自己或成环 | BR-TAX-006 |
+| 400 | 40017 | BATCH_SIZE_INVALID | 批量条目为空或去重后超过 50 条 | BR-BATCH-002、§4.6 第 21 条 |
+| 400 | 40018 | SORT_FIELD_INVALID | `sort` 字段不在该列表的白名单内，或方向不是 `asc` / `desc` | BR-SEARCH-007 |
 | 401 | 40100 | UNAUTHENTICATED | 未登录、会话过期或已登出 | FR-AUTH-002、FR-AUTH-004 |
-| 401 | 40101 | LOGIN_FAILED | 登录名不存在、密码错误或账号被锁定，**三种情况响应完全相同** | §4.1.1、§4.1.2 |
+| 401 | 40101 | LOGIN_FAILED | 登录名不存在、密码错误、账号被锁定或账号已停用，**四种情况响应完全相同** | §4.1.1、§4.1.2、BR-USER-001 |
 | 403 | 40300 | CSRF_INVALID | CSRF 令牌缺失或不匹配 | §4.1.2 |
 | 404 | 40400 | NOT_FOUND | 资源不存在 / 无权限 / 不是你的资源，**统一响应体** | §4.4 |
 | 409 | 40900 | STATE_CONFLICT | 当前文章状态不允许此操作（含并发下状态已变） | §4.4、§5.6 |
 | 409 | 40901 | SUBMISSION_STALE | 提交轮次已变化（旧页面审核新一轮内容） | §5.6 |
 | 409 | 40902 | SCHEDULE_ALREADY_DUE | 待发布文章的原预定时间已到达，不能再改期 | BR-PUB-008 |
 | 409 | 40903 | ARTICLE_HAS_AUDIT_TRAIL | 草稿曾经提交过（有留痕），不能删除 | BR-DEL-001、TU-03b |
-| 409 | 40904 | TAXONOMY_IN_USE | 分类或标签被任意状态的文章引用，不能改名或删除 | BR-TAX-004 |
+| 409 | 40904 | TAXONOMY_IN_USE | 分类或标签被任意状态的**未删除**文章引用，不能改名、改父分类或删除 | BR-TAX-004、BR-TAX-009 |
 | 409 | 40905 | USERNAME_TAKEN | 规范化后的登录名已存在（含与管理员重名） | §4.1.1 |
-| 409 | 40906 | NAME_DUPLICATE | 分类或标签名称重复【补充，见 §16】 | — |
+| 409 | 40906 | NAME_DUPLICATE | 分类或标签名称重复（同类内不区分大小写）【补充，见 §16】 | — |
+| 409 | 40907 | VERSION_CONFLICT | 编辑时 `expected_version` 与文章当前版本不一致（另一处已保存过），内容不变【补充，见 §16-#11】 | §6.4 |
+| 409 | 40908 | CATEGORY_HAS_CHILDREN | 删除仍有未删除子分类的分类 | BR-TAX-009 |
+| 409 | 40909 | LAST_ADMIN | 停用或降级后将没有启用的管理员，或管理员停用、降级自己 | BR-ROLE-004、§4.6 第 19 条 |
+| 409 | 40910 | ROLE_CHANGE_FORBIDDEN | 把名下有文章（含已逻辑删除的）的编辑提升为管理员 | BR-ROLE-005、§4.6 第 20 条 |
 | 500 | 50000 | INTERNAL_ERROR | 服务端异常；流程操作整体不生效（§5.6） | — |
 
-> 说明：409 各子码只在请求者已通过角色闸和归属闸后才可能出现，所以细分原因不会泄露资源存在性。
+> 说明：409 各子码只在请求者已通过权限闸和归属闸后才可能出现，所以细分原因不会泄露资源存在性。权限不足仍是 `404 40400`，**不新增 403 业务码**（403 只用于 CSRF）。
+>
+> 不存在的路径（没有匹配的接口）同样返回 `404 40400` 与统一响应体，**不论是否登录**：拦截器只对已匹配的接口生效，所以未登录访问不存在的 `/api/**` 路径得到 404 而不是 401（v2.6 修订，由 H 的全局异常处理实现）。
+
+### 3.4 接口 → 权限点对照（v2.6）
+
+依据：SRS §4.7、BR-RBAC-003。每个后台接口在 Controller 方法上声明 `@RequiresPermission`；下表是唯一对照。「已登录」与「匿名」两类是 `PermissionCoverageChecker` 的白名单。
+
+| 权限点 | 接口 |
+|---|---|
+| 匿名（白名单） | #1、#2、#3、#29、#30、#31、#43 |
+| 已登录（白名单，不需要权限点） | #4、#5 |
+| `article:read` | #6、#8、#32 |
+| `article:create` | #7 |
+| `article:update` | #9 |
+| `article:delete` | #10、#42 |
+| `article:submit` / `article:withdraw` / `article:reschedule` | #11 / #12 / #13 |
+| `review:queue` | #14、#15 |
+| `review:approve` | #16、#40 |
+| `review:reject` | #17 |
+| `review:unpublish` | #18、#41 |
+| `audit:read` | #19 |
+| `category:read` | #20 |
+| `category:create` | #21 |
+| `category:update` | #22、#38、#39 |
+| `category:delete` | #23 |
+| `tag:read` / `tag:create` / `tag:update` / `tag:delete` | #24 / #25 / #26 / #27 |
+| `media:upload` | #28 |
+| `user:read` | #33 |
+| `user:status` | #34 |
+| `user:assign-role` | #35 |
+| `role:read` | #36、#37 |
+| `oplog:read` | #44 |
+
+`article:read:all` 不对应某个接口：持有它的请求在 #6、#8、#19、#32 中得到「全部文章」作用域，否则只得到本人文章（architecture §5.3）。
 
 ---
 
@@ -270,9 +318,19 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | `PUBLISHED` | 已发布 | 已对博客前台公开 |
 | `UNPUBLISHED` | 已下架 | 曾经发布，被管理员下架 |
 
-> architecture §4.1 规定数据库里存中文字面量。接口层统一用上表的英文值，由后端负责映射（见 §16）。
+> 数据库与接口用**同一套英文值**，后端不做中英映射（2026-11-23 定稿，`doc/db/schema.md` §1；原 §15 冲突 9 已结案）。中文只用于界面展示。
 
 **角色 `Role`**：`EDITOR`（内容编辑）、`ADMIN`（管理员）。
+
+**账号状态 `AccountStatus`**（v2.6，BR-USER-001）：`ENABLED`（启用）、`DISABLED`（停用）。
+
+**分类状态 `CategoryStatus`**（v2.6，BR-TAX-008）：`ENABLED`（启用）、`DISABLED`（停用）。
+
+**权限点 `PermissionCode`**（v2.6）：SRS §4.7 的 27 个 `资源:动作` 字符串，如 `article:create`、`review:approve`、`user:assign-role`。
+
+**操作日志模块 `OplogModule`**（v2.6）：`AUTH`、`ARTICLE`、`REVIEW`、`TAX`、`MEDIA`、`USER`。
+
+**排序参数 `sort`**（v2.6，BR-SEARCH-007）：形式 `字段,asc|desc`，可重复传多次，按出现顺序生效（`sort=status,asc` 这类不在白名单的字段返回 `400 SORT_FIELD_INVALID`）。各列表白名单：#6 `updated_at`、`created_at`、`published_at`、`title`、`id`；#33 `created_at`、`username`；#44 `created_at`；#24 `name`、`created_at`；#30 只允许 `published_at`。服务端在末尾固定追加 `id` 保证分页稳定。
 
 **留痕操作类型 `AuditAction`**（SRS §6.6）
 
@@ -331,9 +389,14 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | 字段 | 类型 | 可空 | 说明 |
 |---|---|---|---|
 | `id` | int64 | 否 | 账号 ID |
-| `username` | string | 否 | 登录名，规范化后的形式（去首尾空白、转小写）【补充：存储形式见 §16】 |
-| `role` | Role | 否 | 单一角色 |
+| `username` | string | 否 | 登录名，规范化后的形式（去首尾空白、转小写）；库里只存这一种形式（§16-#7 已决） |
+| `role` | Role | 否 | 单一角色（代码，与 v0.1 相同） |
+| `role_name` | string | 否 | 角色中文名（v2.6） |
+| `status` | AccountStatus | 否 | 账号状态（v2.6） |
 | `created_at` | datetime | 否 | 注册或初始化时间 |
+| `updated_at` | datetime | 否 | 最后修改时间（v2.6；启停、改角色时更新） |
+
+#5 当前用户另返回 `permissions`（PermissionCode[]，按代码升序），前端据此显示菜单（FR-AUTH-005）。
 
 不返回密码或密码哈希。本期不采集邮箱、手机号、昵称（§4.1.1）。
 
@@ -358,13 +421,19 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 |---|---|---|---|
 | `id` | int64 | 否 | |
 | `name` | string | 否 | 1～50 个字符，不允许全空白【补充：长度】 |
-| `in_use` | boolean | 否 | 是否被任意状态的文章引用（被引用时不能改名或删除）。只给布尔值，不给计数，避免通过计数推断他人文章数量（BR-SEARCH-003） |
+| `parent_id` | int64 | 是 | 父分类 ID；一级分类为 `null`（v2.6） |
+| `sort_order` | integer | 否 | 同级排序值，升序（v2.6） |
+| `status` | CategoryStatus | 否 | 启用 / 停用（v2.6）。`effective_status` 不单独返回：父分类停用时前端按父级判断 |
+| `children` | Category[] | 否 | 子分类（仅树形响应 #20 中出现；二级分类的 `children` 恒为 `[]`）（v2.6） |
+| `in_use` | boolean | 否 | 是否被任意状态的未删除文章引用（被引用时不能改名、改父分类或删除）。只给布尔值，不给计数，避免通过计数推断他人文章数量（BR-SEARCH-003） |
 | `created_at` | datetime | 否 | |
 | `updated_at` | datetime | 否 | |
 
 ### 4.6 标签 `Tag`
 
-字段同 `Category`。标签扁平，无父子层级（BR-SEARCH-006）。
+字段为 `Category` 中的 `id`、`name`、`in_use`、`created_at`、`updated_at`（没有 `parent_id`、`sort_order`、`status`、`children`）。标签扁平，无父子层级（BR-SEARCH-006）。
+
+分类、标签都是逻辑删除：已删除的不出现在任何响应里，也不对外暴露删除标记。
 
 ### 4.7 分类 / 标签摘要 `CategoryBrief`、`TagBrief`
 
@@ -392,10 +461,12 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | `url` | string | 否 | `/api/media/{media_id}` |
 | `mime_type` | string | 否 | 真实类型 |
 | `size` | int64 | 否 | 字节数 |
+| `original_name` | string | 否 | 上传时的原始文件名（去掉路径），下载 #43 的文件名（v2.6，FR-MEDIA-005） |
+| `download_url` | string | 否 | `/api/media/{media_id}/download`（v2.6） |
 | `linked` | boolean | 否 | 是否已保存进文章引用。刚上传时为 `false`；未关联超过 24 小时会被系统清理（BR-MEDIA-004） |
 | `created_at` | datetime | 否 | |
 
-不返回原始文件名和存储路径。存储文件名由系统生成（BR-MEDIA-002）。
+不返回存储路径。存储文件名由系统生成，原始文件名只用于下载时的文件名，不参与存储（BR-MEDIA-002）。
 
 ### 4.10 文章 `Article`（后台详情）
 
@@ -405,9 +476,9 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 
 | 字段 | 类型 | 必填 | 可空 | 说明 |
 |---|---|---|---|---|
-| `title` | string | 是 | 否 | 单行，不允许全空白；长度上限见 §16【补充建议 ≤ 200】 |
-| `content` | string | 是 | 否 | Markdown 原文，规则见 §6.0 |
-| `excerpt` | string | 否 | 否 | 未填写时为 `""`，系统不自动截取 |
+| `title` | string | 是 | 否 | 单行，不允许全空白；≤ 200 字符（§16-#3） |
+| `content` | string | 是 | 否 | Markdown 原文，规则见 §6.0；≤ 1 MiB（UTF-8 字节，§16-#3） |
+| `excerpt` | string | 否 | 否 | 未填写时为 `""`，系统不自动截取；≤ 500 字符（§16-#3） |
 | `cover` | MediaRef | 否 | 是 | 封面图；写入时用 `cover_media_id` |
 | `audio` | MediaRef | 否 | 是 | 文章音频；写入时用 `audio_media_id` |
 | `category` | CategoryBrief | 是 | 否 | 单选；写入时用 `category_id` |
@@ -424,7 +495,8 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | `published_at` | datetime | 是 | 本次实际发布时间；下架期间保留上次取值（§5.5） |
 | `created_at` | datetime | 否 | |
 | `updated_at` | datetime | 否 | 最后修改时间 |
-| `submitted_at` | datetime | 是 | 最近一次提交审核时间，用于审核队列排序 |
+| `version` | int32 | 否 | 内容版本号（乐观锁）。创建时为 `0`，每次 #9 保存成功加 1；流程动作不改变它。#9 必须原样带回为 `expected_version`（§16-#11） |
+| `submitted_at` | datetime | 是 | 最近一次提交审核时间，用于审核队列排序。不存表，取本轮「提交审核」留痕的时间 |
 
 **（3）来自留痕的派生字段（只读，不存回文章记录）**
 
@@ -563,6 +635,50 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 - 聚合范围与本次请求的 `category_id`、`tag_ids`、`q`、分页**无关**，保证导航稳定；没有已发布文章引用的分类、标签不出现（不暴露空分类与未用标签）。
 - 下架后立即不再计入（与列表同一查询口径，不缓存）。
 
+### 4.15 后台用户 `AdminUser`（v2.6，#33～#35）
+
+字段同 `User`（§4.2，不含 `permissions`）。不返回密码哈希、登录失败计数。
+
+### 4.16 角色 `RoleDetail` 与权限点 `Permission`（v2.6，#36、#37）
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `RoleDetail.code` | Role | |
+| `RoleDetail.name` | string | 中文名 |
+| `RoleDetail.permissions` | PermissionCode[] | 该角色持有的权限点 |
+| `Permission.code` | PermissionCode | |
+| `Permission.name` | string | 中文说明 |
+| `Permission.module` | string | 分组：ARTICLE / REVIEW / AUDIT / TAX / MEDIA / USER / OPLOG |
+
+### 4.17 操作日志 `OperationLog`（v2.6，#44）
+
+| 字段 | 类型 | 可空 | 说明 |
+|---|---|---|---|
+| `id` | int64 | 否 | |
+| `operator` | UserBrief | 是 | 匿名操作（登录失败、注册）为 `null` |
+| `module` | OplogModule | 否 | |
+| `operation` | string | 否 | 如 `ARTICLE_DELETE`、`LOGIN_FAILED` |
+| `target_type` / `target_id` | string / int64 | 是 | |
+| `http_method` / `request_uri` | string | 否 | 不含查询串 |
+| `client_ip` | string | 否 | |
+| `success` | boolean | 否 | |
+| `error_code` | integer | 是 | 失败时的业务码 |
+| `duration_ms` | integer | 否 | |
+| `created_at` | datetime | 否 | |
+
+不含请求体、密码、登录失败时尝试的登录名（BR-OPLOG-003）。
+
+### 4.18 批量结果 `BatchResult`（v2.6，#40～#42）
+
+```json
+{ "total": 3, "succeeded": 2, "failed": 1,
+  "results": [ { "id": 101, "success": true,  "code": 0,     "message": "OK" },
+               { "id": 102, "success": true,  "code": 0,     "message": "OK" },
+               { "id": 999, "success": false, "code": 40400, "message": "资源不存在" } ] }
+```
+
+数量校验在**去重之后**由 Service 完成：为空或去重后超过 50 条返回 `400 40017 BATCH_SIZE_INVALID`；请求 DTO 上不要加 `@Size` / `@NotEmpty`，否则只会得到通用的 `40000`。`results` 按请求中去重后的顺序返回；`code` 与对应单条接口的错误码一致（§3.3），不存在与无权都为 `40400`。
+
 ---
 
 ## 5 认证与账号模块（AUTH / USER）
@@ -604,6 +720,7 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 ```
 
 - **错误**：`400 PARAM_INVALID`（缺字段）、`400 USERNAME_INVALID`、`400 PASSWORD_INVALID`、`400 FIELD_NOT_WRITABLE`、`403 CSRF_INVALID`、`409 USERNAME_TAKEN`（含与管理员重名；并发注册同名只有一个成功）。
+- **v2.6**：写入 `role_id` = `EDITOR`、`status` = `ENABLED`；响应不变（`data` 为 `User`，多出 §4.2 的新字段）。
 - **覆盖需求**：FR-USER-001、§4.1.1、FR-AUTH-004；验收 FR-AUTH-001/FR-USER-001 ①～⑤。
 
 ### 5.3 `POST /api/auth/login` 登录
@@ -632,6 +749,7 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 ```
 
 - **锁定规则**：同一登录名连续 5 次认证失败锁定 15 分钟；锁定期间即使密码正确也返回上面同一个 401；到期自动解除。
+- **v2.6**：已停用账号按 `401 LOGIN_FAILED` 统一失败（BR-USER-001）；登录成功、失败都记一条操作日志（失败不记登录名，BR-OPLOG-003）。
 - **覆盖需求**：FR-AUTH-001、FR-AUTH-003、§4.1.1、§4.1.2；TU-25。
 
 ### 5.4 `POST /api/auth/logout` 登出
@@ -650,20 +768,59 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 - **响应 200**：
 
 ```json
-{ "code": 0, "message": "OK", "data": { "id": 1, "username": "admin", "role": "ADMIN", "created_at": "2026-10-19T00:00:00+08:00" } }
+{ "code": 0, "message": "OK", "data": { "id": 1, "username": "admin", "role": "ADMIN", "role_name": "管理员", "status": "ENABLED",
+  "created_at": "2026-10-19T00:00:00+08:00", "updated_at": "2026-10-19T00:00:00+08:00",
+  "permissions": ["article:read", "article:read:all", "audit:read", "category:create", "…"] } }
 ```
 
 - **错误**：`401 UNAUTHENTICATED`。
-- **覆盖需求**：FR-AUTH-005、BR-ROLE-001；FR-AUTH-004（会话失效检测）。
+- **v2.6**：增加 `role_name`、`status`、`updated_at`、`permissions`；权限集每次请求从库加载（BR-RBAC-005），所以角色被改后下一次调用即反映。
+- **覆盖需求**：FR-AUTH-005、BR-ROLE-001、BR-RBAC-001；FR-AUTH-004（会话失效检测）。
 
-### 5.6 不提供的账号接口
+### 5.6 `GET /api/admin/users` 用户列表（#33，v2.6）
+
+- **权限**：`user:read`（ADMIN）；编辑调用 404。
+- **查询参数**：`page`、`page_size`；`keyword`（登录名模糊匹配，去首尾空白后 ≤ 32）；`role`（Role）；`status`（AccountStatus）；`sort`（白名单 `created_at`、`username`，默认 `created_at,desc`）。
+- **响应 200**：分页对象，`items` 为 `AdminUser[]`。
+- **错误**：`400 PARAM_INVALID`、`400 SORT_FIELD_INVALID`、`401`、`404`（编辑）。
+- **覆盖需求**：FR-USER-006、BR-SEARCH-007；TU-26。
+
+### 5.7 `PUT /api/admin/users/{id}/status` 启用 / 停用账号（#34，v2.6）
+
+- **权限**：`user:status`（ADMIN）；需要 CSRF。
+- **请求体**：`{ "status": "DISABLED" }`
+- **响应 200**：`data` 为 `AdminUser`。被停用账号的已有会话在下一次请求返回 401（BR-USER-001）。
+- **错误**：`404`（账号不存在、编辑调用）、`400 PARAM_INVALID`、`409 LAST_ADMIN`（操作自己，或停用后没有启用管理员）、`401`、`403`。状态本来就是目标值时幂等返回 200。
+- **覆盖需求**：FR-USER-003、BR-USER-001～002、BR-ROLE-004；TU-27、TU-30。
+
+### 5.8 `PUT /api/admin/users/{id}/role` 分配角色（#35，v2.6）
+
+- **权限**：`user:assign-role`（ADMIN）；需要 CSRF。
+- **请求体**：`{ "role_code": "ADMIN" }`
+- **响应 200**：`data` 为 `AdminUser`。新角色在被操作账号的下一次请求生效（BR-RBAC-005）。
+- **错误**：`404`（账号不存在、编辑调用）、`400 PARAM_INVALID`（角色代码无效）、`409 LAST_ADMIN`（操作自己，或降级后没有启用管理员）、`409 ROLE_CHANGE_FORBIDDEN`（名下有文章的编辑被提升）、`401`、`403`。
+- **覆盖需求**：FR-USER-002、BR-ROLE-004～005；TU-30；§4.6 第 19、20 条。
+
+### 5.9 `GET /api/roles` 角色及其权限点（#36，v2.6）
+
+- **权限**：`role:read`（ADMIN）。只读，**不提供修改角色权限的接口**（BR-RBAC-002）。
+- **响应 200**：`data` 为 `RoleDetail[]`（2 项）。
+- **覆盖需求**：FR-USER-007、BR-RBAC-001～002。
+
+### 5.10 `GET /api/permissions` 权限点清单（#37，v2.6）
+
+- **权限**：`role:read`（ADMIN）。
+- **响应 200**：`data` 为 `Permission[]`（27 项，按 `module`、`code` 排序）。
+- **覆盖需求**：FR-USER-007、BR-RBAC-002。
+
+### 5.11 不提供的账号接口
 
 | 需求 | 交付范围 | 本规范处理 |
 |---|---|---|
-| FR-USER-002 修改账号角色 | 后续版本 | 不设计接口 |
-| FR-USER-003 停用与启用账号 | 后续版本 | 不设计接口 |
 | FR-USER-004 密码找回、重置、自助改密 | 本期不做 | **不得提供**任何相关接口 |
 | FR-USER-005 改派文章归属编辑 | 后续版本 | 不设计接口；`author_id` 不可写 |
+| 修改角色的权限点、自定义角色 | 本期不做（BR-RBAC-002） | 不得提供 |
+| 删除账号 | 本期不做（BR-USER-002） | 不得提供；只能停用 |
 
 ---
 
@@ -700,11 +857,13 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 |---|---|---|---|
 | `page`、`page_size` | integer | 否 | 见 §1.5 |
 | `status` | ArticleStatus | 否 | 按状态筛选，可多值（`status=DRAFT&status=REJECTED`） |
-| `category_id` | int64 | 否 | 按分类筛选 |
+| `category_id` | int64 | 否 | 按分类筛选；为一级分类时**包含其子分类**（v2.6，BR-SEARCH-008） |
 | `tag_ids` | int64[] | 否 | 按标签筛选，可多值，**交集语义**（同时具备全部标签） |
-| `title` | string | 否 | 标题模糊匹配（不检索正文） |
+| `keyword` | string | 否 | （v2.6）关键字，匹配**标题或摘要**，不检索正文；转义与长度规则同 #30 的 `q` |
+| `title` | string | 否 | v0.1 的旧参数，v2.6 起视为 `keyword` 的别名（同样匹配标题或摘要）；前端改用 `keyword` 后删除 |
+| `created_from` / `created_to`、`updated_from` / `updated_to`、`published_from` / `published_to` | datetime | 否 | （v2.6）时间范围，左闭右开，必须带时区偏移 |
 | `author_id` | int64 | 否 | 按归属编辑筛选。管理员可用；编辑传入时与本人条件取交集，传他人 ID 只会得到空列表 |
-| `sort` | string | 否 | 【补充】`updated_at_desc`（默认）、`updated_at_asc`、`created_at_desc` |
+| `sort` | string | 否 | （v2.6）多字段排序 `字段,asc|desc`，可重复；白名单 `updated_at`、`created_at`、`published_at`、`title`、`id`；默认 `updated_at,desc`；非白名单 `400 SORT_FIELD_INVALID`。v0.1 的 `updated_at_desc` 等取值作废 |
 
 - **响应 200**：`data` 为分页对象，`items` 为 `ArticleListItem[]`。
 
@@ -736,7 +895,7 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 ```
 
 - **错误**：`400 PARAM_INVALID`（参数类型错误）、`401 UNAUTHENTICATED`。不会返回 404。
-- **覆盖需求**：FR-ARTICLE-003、FR-ARTICLE-006、BR-SEARCH-001～005、BR-ISO-001～003、X-ISO-01～04、§7.2（3）；TU-05、TU-06、TU-07、TU-22；§4.6 第 16 条。
+- **覆盖需求**：FR-ARTICLE-003、FR-ARTICLE-006、BR-SEARCH-001～005、BR-SEARCH-007～008、BR-ISO-001～003、X-ISO-01～04、X-DEL-01、§7.2（3）；TU-05、TU-06、TU-07、TU-22、TU-31；§4.6 第 16 条。
 
 ### 6.2 `POST /api/articles` 创建文章草稿
 
@@ -820,6 +979,7 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | `title` | string | 是 | 不允许全空白 |
 | `content` | string | 是 | 规则见 §6.0 |
 | `excerpt` | string | 否 | 省略为 `""` |
+| `expected_version` | int32 | 是 | 编辑页加载时拿到的 `Article.version`；与当前版本不一致返回 `409 VERSION_CONFLICT`【补充，§16-#11】 |
 | `category_id` | int64 | 是 | 必须存在 |
 | `tag_ids` | int64[] | 否 | 省略为 `[]` |
 | `cover_media_id` | int64 / null | 否 | 规则见 §6.0.1；省略或 `null` 表示无封面 |
@@ -831,6 +991,7 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
   "title": "Vue 3 组合式 API 笔记（修订）",
   "content": "# 前言\n\n![架构图](/api/media/5001)\n\n参考：[官方文档](https://vuejs.org/)",
   "excerpt": "组合式 API 的常见用法",
+  "expected_version": 3,
   "category_id": 4,
   "tag_ids": [11],
   "cover_media_id": 5000,
@@ -846,12 +1007,14 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
   - `400 FIELD_NOT_WRITABLE`：带了 `status` 等系统字段。
   - `400 CONTENT_REJECTED` / `MEDIA_REFERENCE_INVALID` / `REFERENCE_INVALID`。
   - `409 STATE_CONFLICT`：状态为 `PENDING_REVIEW`、`SCHEDULED`、`PUBLISHED`（含与提交审核并发、提交先成功的情况），内容不变。
+  - `409 VERSION_CONFLICT`：`expected_version` 不是当前版本（两个标签页同时编辑，后保存的一方），内容不变；前端应提示刷新后重做。状态冲突优先于版本冲突。
   - `401`、`403 CSRF_INVALID`。
+- **v2.6**：`category_id` 指向停用分类（或其父分类停用）返回 `400 CATEGORY_DISABLED`；指向已删除分类按不存在处理 `400 REFERENCE_INVALID`。#7 创建同样适用。
 - **覆盖需求**：FR-ARTICLE-002、FR-TAX-003、FR-MEDIA-001（关联、移除、替换）、FR-MEDIA-004、BR-002、BR-007、BR-ISO-001、BR-TAX-001～002、BR-MEDIA-001、BR-MEDIA-008、X-STATE-01；TU-02、TU-12、TU-13、TU-19、TU-20、TU-24；§4.6 第 6、8、12、17 条。
 
 ### 6.5 `DELETE /api/articles/{id}` 删除草稿
 
-- **说明**：物理删除从未提交过的草稿（状态为 `DRAFT` 且没有任何留痕），不生成留痕。同时清理该文章拥有的全部媒体，包括还没关联的上传文件。删除不可撤销，前端必须二次确认。
+- **说明**：**逻辑删除**（v2.6，BR-DEL-002）从未提交过的草稿（状态为 `DRAFT` 且没有任何留痕），不生成留痕，记一条操作日志。删除后该文章对所有接口视为不存在（详情、编辑等返回 404，列表与计数不含它）；本期不提供恢复。同时清理该文章拥有的全部媒体，包括还没关联的上传文件。删除不可撤销，前端必须二次确认。
 - **权限**：仅归属 EDITOR；需要 CSRF。
 - **查询参数**：
 
@@ -868,11 +1031,20 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
   - `409 ARTICLE_HAS_AUDIT_TRAIL`：是草稿，但有留痕（例如「提交后又被撤回」）。
   - `400 CONFIRM_REQUIRED`：没有带 `confirm=true`。
   - `401`、`403 CSRF_INVALID`。
-- **覆盖需求**：FR-ARTICLE-005、BR-DEL-001～005、BR-MEDIA-004；TU-03、TU-03b；§4.6 第 7、14 条。
+- **覆盖需求**：FR-ARTICLE-005、BR-DEL-001～008、BR-MEDIA-004；TU-03、TU-03b、TU-31；§4.6 第 7、14 条。
+
+### 6.5.1 `POST /api/articles/batch-delete` 批量删除草稿（#42，v2.6）
+
+- **说明**：对每个 ID 独立执行 #10 的完整规则（逐条独立事务，BR-BATCH-003），一条失败不影响其他条。
+- **权限**：`article:delete`（EDITOR）；管理员调用 404。需要 CSRF。
+- **请求体**：`{ "article_ids": [103, 104, 105], "confirm": true }`。`article_ids` 去重后 1～50 个；`confirm` 必须为 `true`。
+- **响应 200**：`data` 为 `BatchResult`（§4.18）。他人草稿与不存在的 ID 结果码同为 `40400`；非草稿 `40900`；有留痕的草稿 `40903`。
+- **错误**（整体）：`400 BATCH_SIZE_INVALID`、`400 CONFIRM_REQUIRED`、`400 PARAM_INVALID`、`401`、`403`、`404`（管理员）。
+- **覆盖需求**：FR-ARTICLE-007、BR-BATCH-001～004、BR-DEL-001～008；TU-28；§4.6 第 21 条。
 
 ### 6.6 `POST /api/articles/{id}/submit` 提交审核
 
-- **说明**：`DRAFT` / `REJECTED` / `UNPUBLISHED` → `PENDING_REVIEW`。写入 `submitted_at`，生成「提交审核」留痕；该留痕的 ID 就是本轮的提交轮次标识。
+- **说明**：`DRAFT` / `REJECTED` / `UNPUBLISHED` → `PENDING_REVIEW`。生成「提交审核」留痕（`submitted_at` 即这条留痕的时间，不另存）；该留痕的 ID 就是本轮的提交轮次标识。
 - **权限**：仅归属 EDITOR；需要 CSRF。
 - **请求体**：无（或 `{}`）。
 - **响应 200**：
@@ -932,10 +1104,14 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `category_id` | int64 | 否 | 按分类 |
+| `category_id` | int64 | 否 | 按分类；为一级分类时包含其子分类（同 #6） |
 | `tag_ids` | int64[] | 否 | 多值，交集语义 |
-| `title` | string | 否 | 标题模糊匹配 |
+| `keyword` | string | 否 | （v2.6）匹配标题或摘要，规则同 #6 |
+| `title` | string | 否 | `keyword` 的别名，同 #6 |
+| `created_from` / `created_to`、`updated_from` / `updated_to`、`published_from` / `published_to` | datetime | 否 | （v2.6）时间范围，左闭右开，同 #6 |
 | `author_id` | int64 | 否 | 管理员可用；编辑传入时与本人条件取交集 |
+
+> 同一组筛选参数传给 #6 与 #32 时，#32 的 `total` 必须等于 #6 不带 `status` 时的 `total`（X-ISO-03「同一结果集」）。
 
 - **响应 200**：6 种状态都返回，没有文章的状态为 `0`；`total` 为 6 项之和。
 
@@ -991,7 +1167,7 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 
 ### 7.2 `GET /api/reviews/standard` 当前审核标准与驳回类别【补充】
 
-- **说明**：返回当前审核标准版本和驳回类别字典，供审核页展示。审核标准版本由服务端配置，审核请求**不**由客户端传入，由服务端写入留痕。
+- **说明**：返回当前审核标准版本和驳回类别字典，供审核页展示。审核标准版本登记在 `review_standard` 表（Flyway 迁移维护，当前版本 = 已生效的最新一行），审核请求**不**由客户端传入，由服务端写入留痕。
 - **权限**：仅 ADMIN。
 - **响应 200**：
 
@@ -1061,7 +1237,7 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 |---|---|---|---|
 | `submission_id` | int64 | 是 | 同 §7.3 |
 | `reject_category` | RejectCategory | 是 | 8 类之一 |
-| `comment` | string | 是 | 驳回意见；空字符串或纯空格视为缺失 |
+| `comment` | string | 是 | 驳回意见；空字符串或纯空格视为缺失；≤ 500 字符（§16-#3） |
 
 ```json
 { "submission_id": 9031, "reject_category": "QUALITY_POSITIONING", "comment": "正文缺少实际案例" }
@@ -1079,7 +1255,7 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `reason` | string | 是 | 空字符串或纯空格视为缺失 |
+| `reason` | string | 是 | 空字符串或纯空格视为缺失；≤ 500 字符（§16-#3） |
 
 ```json
 { "reason": "技术结论已过期，需更新" }
@@ -1088,6 +1264,23 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 - **响应 200**：`{ "code": 0, "message": "OK", "data": { "id": 101, "status": "UNPUBLISHED" } }`
 - **错误**：`404`、`400 REASON_REQUIRED`、`409 STATE_CONFLICT`（不是已发布）、`401`、`403`。
 - **覆盖需求**：FR-REVIEW-004、BR-008、BR-011、BR-AUDIT-003、BR-AUDIT-005；TU-10、TU-11、TU-15；§4.6 第 3、13 条。
+
+### 7.6 `POST /api/reviews/batch-approve` 批量审核通过（#40，v2.6）
+
+- **说明**：批量审核通过即 SRS 所说的"批量发布"：每篇按自己的预定发布时间立即发布或进入待发布。对每一条在独立事务中完整执行 #16（三道闸门、§5.6 轮次校验、留痕）。**不提供批量驳回**（BR-BATCH-001）。
+- **权限**：`review:approve`（ADMIN）；编辑调用 404。需要 CSRF。
+- **请求体**：`{ "items": [ { "article_id": 101, "submission_id": 5501 }, { "article_id": 102, "submission_id": 5502 } ] }`。去重（按 `article_id`）后 1～50 条；每条必须带 `submission_id`（BR-BATCH-005）。
+- **响应 200**：`data` 为 `BatchResult`；单条失败码与 #16 一致（`40400`、`40900`、`40901`）。
+- **错误**（整体）：`400 BATCH_SIZE_INVALID`、`400 SUBMISSION_ID_INVALID`（任一条缺失或格式无效则整批不执行）、`401`、`403`、`404`（编辑）。
+- **覆盖需求**：FR-REVIEW-005、BR-BATCH-001～005、BR-PUB-001；TU-28。
+
+### 7.7 `POST /api/reviews/batch-unpublish` 批量下架（#41，v2.6）
+
+- **权限**：`review:unpublish`（ADMIN）；需要 CSRF。
+- **请求体**：`{ "article_ids": [101, 102], "reason": "技术结论已过期，需更新" }`。`reason` 规则同 #18，所有条目共用。
+- **响应 200**：`data` 为 `BatchResult`；单条失败码与 #18 一致。
+- **错误**（整体）：`400 BATCH_SIZE_INVALID`、`400 REASON_REQUIRED`、`401`、`403`、`404`（编辑）。
+- **覆盖需求**：FR-REVIEW-006、BR-BATCH-001～004、BR-008。
 
 ---
 
@@ -1135,56 +1328,89 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 - **错误**：`401`、`404`（不存在、他人文章）。
 - **覆盖需求**：FR-AUDIT-002、BR-AUDIT-001～004、BR-ISO-001、X-AUDIT-02、X-AUDIT-03；TU-08；§4.6 第 9 条。
 
+### 8.2 `GET /api/admin/operation-logs` 系统操作日志（#44，v2.6）
+
+- **说明**：查询 `sys_operation_log`（SRS §6.7）。与 #19 的文章流程留痕是两回事。只读，**不提供修改或删除日志的接口**。
+- **权限**：`oplog:read`（ADMIN）；编辑调用 404。
+- **查询参数**：`page`、`page_size`；`operator_id`；`module`（OplogModule）；`success`（boolean）；`from` / `to`（datetime，左闭右开）；`sort`（白名单 `created_at`，默认 `created_at,desc`）。
+- **响应 200**：分页对象，`items` 为 `OperationLog[]`（§4.17）。
+- **错误**：`400 PARAM_INVALID`、`400 SORT_FIELD_INVALID`、`401`、`404`（编辑）。
+- **覆盖需求**：FR-OPLOG-002、BR-OPLOG-005；TU-26。写入侧（FR-OPLOG-001）由 `@OperationLog` 切面完成，见 architecture §5.7。
+
 ---
 
 ## 9 分类与标签模块（TAX）
 
 通用规则：
-- 分类或标签只要被**任意状态**的文章引用，就不能改名或删除，返回 `409 TAXONOMY_IN_USE`（管理员也一样）。
+- 分类或标签只要被**任意状态的未删除**文章引用，就不能改名（分类另含改父分类）或删除，返回 `409 TAXONOMY_IN_USE`（管理员也一样）。排序、启停不受此限。
+- 删除一律为**逻辑删除**（v2.6）：删除后从所有响应中消失，名称可以重新使用（BR-DEL-007）。
+- 分类最多 2 级（v2.6）：`parent_id` 只能指向未删除的一级分类，否则 `400 CATEGORY_DEPTH_EXCEEDED`。
 - 引用保护判定与改名、删除、文章关联保存在同一并发一致性约束下执行；删除分类不会把文章分类置空，也不会级联删除文章。
 - 名称：去首尾空白后 1～50 个字符，不允许全空白。【补充：长度、去空白、重名处理见 §16】
 
 ### 9.1 `GET /api/categories` 分类列表
 
-- **说明**：返回全部分类（数量有限，不分页），编辑写文章时选择分类、管理员维护分类都用它。
+- **说明**：（v2.6）返回**分类树**：一级分类按 `sort_order`、`id` 升序，每个带 `children`（二级分类，同样排序）。数量有限，不分页。编辑写文章时选择分类、管理员维护分类都用它。
+- **查询参数**：`status`（可选，`ENABLED` 时只返回启用分类，且父分类停用时其子分类不返回；编辑写文章时用它）。
 - **权限**：已登录（EDITOR、ADMIN）。
 - **响应 200**：
 
 ```json
-{ "code": 0, "message": "OK", "data": [ { "id": 3, "name": "后端", "in_use": true, "created_at": "2026-10-20T10:00:00+08:00", "updated_at": "2026-10-20T10:00:00+08:00" } ] }
+{ "code": 0, "message": "OK", "data": [
+  { "id": 3, "name": "后端", "parent_id": null, "sort_order": 1, "status": "ENABLED", "in_use": false,
+    "created_at": "2026-10-20T10:00:00+08:00", "updated_at": "2026-10-20T10:00:00+08:00",
+    "children": [ { "id": 8, "name": "Spring", "parent_id": 3, "sort_order": 1, "status": "ENABLED", "in_use": true,
+                    "created_at": "2026-11-23T10:00:00+08:00", "updated_at": "2026-11-23T10:00:00+08:00", "children": [] } ] } ] }
 ```
 
 - **错误**：`401`。
-- **覆盖需求**：FR-TAX-001、FR-TAX-003（选择分类的前置查询，【补充】）、BR-TAX-003。
+- **覆盖需求**：FR-TAX-001、FR-TAX-003（选择分类的前置查询，【补充】）、FR-TAX-004、BR-TAX-003、BR-TAX-006～008。
 
 ### 9.2 `POST /api/categories` 创建分类
 
 - **权限**：仅 ADMIN；编辑调用 404。需要 CSRF。
-- **请求体**：`{ "name": "后端" }`
+- **请求体**：`{ "name": "Spring", "parent_id": 3, "sort_order": 1 }`（v2.6：`parent_id` 可空，`sort_order` 默认 0；新分类为 `ENABLED`）
 - **响应 201**：`data` 为 `Category`。
-- **错误**：`400 PARAM_INVALID`、`409 NAME_DUPLICATE`【补充】、`401`、`403`、`404`（编辑）。
-- **覆盖需求**：FR-TAX-001、BR-TAX-005。
+- **错误**：`400 PARAM_INVALID`、`400 CATEGORY_DEPTH_EXCEEDED`、`409 NAME_DUPLICATE`【补充】、`401`、`403`、`404`（编辑）。
+- **覆盖需求**：FR-TAX-001、BR-TAX-005～006。
 
-### 9.3 `PUT /api/categories/{id}` 修改分类名称
+### 9.3 `PUT /api/categories/{id}` 修改分类名称与父分类
 
 - **权限**：仅 ADMIN；需要 CSRF。
-- **请求体**：`{ "name": "服务端" }`
+- **请求体**：`{ "name": "服务端", "parent_id": null }`（v2.6：可同时改 `parent_id`；改名、改父分类都受引用保护；有子分类的一级分类不能挂到别的分类下 → `400 CATEGORY_DEPTH_EXCEEDED`）
 - **响应 200**：`data` 为 `Category`。
-- **错误**：`404`（不存在、编辑调用）、`400 PARAM_INVALID`、`409 TAXONOMY_IN_USE`、`409 NAME_DUPLICATE`、`401`、`403`。
-- **覆盖需求**：FR-TAX-001、BR-TAX-004、BR-TAX-005；TU-18。
+- **错误**：`404`（不存在、编辑调用）、`400 PARAM_INVALID`、`400 CATEGORY_DEPTH_EXCEEDED`、`409 TAXONOMY_IN_USE`、`409 NAME_DUPLICATE`、`401`、`403`。
+- **覆盖需求**：FR-TAX-001、BR-TAX-004～006；TU-18。
 
 ### 9.4 `DELETE /api/categories/{id}` 删除分类
 
 - **权限**：仅 ADMIN；需要 CSRF。
 - **响应 200**：`data: null`。
-- **错误**：`404`、`409 TAXONOMY_IN_USE`、`401`、`403`。
-- **覆盖需求**：FR-TAX-001、BR-TAX-004、BR-TAX-005；TU-18。
+- **说明**：（v2.6）逻辑删除。
+- **错误**：`404`、`409 TAXONOMY_IN_USE`、`409 CATEGORY_HAS_CHILDREN`、`401`、`403`。
+- **覆盖需求**：FR-TAX-001、BR-TAX-004、BR-TAX-005、BR-TAX-009、BR-DEL-006～007；TU-18。
+
+### 9.4.1 `PUT /api/categories/{id}/status` 分类启停（#38，v2.6）
+
+- **权限**：`category:update`（ADMIN）；需要 CSRF。不受引用保护限制。
+- **请求体**：`{ "status": "DISABLED" }`
+- **响应 200**：`data` 为 `Category`。停用后不能再被文章选用（`400 CATEGORY_DISABLED`），已发布文章照常公开（BR-TAX-008）。
+- **错误**：`404`、`400 PARAM_INVALID`、`401`、`403`。
+- **覆盖需求**：FR-TAX-005、BR-TAX-008；§4.6 第 22 条。
+
+### 9.4.2 `PUT /api/categories/sort` 同级批量排序（#39，v2.6）
+
+- **权限**：`category:update`（ADMIN）；需要 CSRF。
+- **请求体**：`{ "parent_id": 3, "items": [ { "id": 8, "sort_order": 1 }, { "id": 9, "sort_order": 2 } ] }`。`items` 1～50 条，全部必须是 `parent_id` 下未删除的子分类（`parent_id` 为 `null` 表示一级分类）。
+- **响应 200**：`data` 为该父级下的 `Category[]`（新顺序）。**单事务**：任一条不合法则整批不生效（与 #40～#42 的逐条语义不同）。
+- **错误**：`400 PARAM_INVALID`（条目不属于该父级）、`400 BATCH_SIZE_INVALID`、`404`（编辑、父分类不存在）、`401`、`403`。
+- **覆盖需求**：FR-TAX-006、BR-TAX-007。
 
 ### 9.5 `GET /api/tags` 标签列表
 
 - **说明**：返回标签列表，支持按名称模糊搜索（编辑器里的标签输入联想）。【补充：分页与搜索参数】
 - **权限**：已登录。
-- **查询参数**：`keyword`（可选，名称模糊匹配）、`page`、`page_size`。
+- **查询参数**：`keyword`（可选，名称模糊匹配）、`page`、`page_size`、`sort`（v2.6，白名单 `name`、`created_at`，默认 `name,asc`）。
 - **响应 200**：分页对象，`items` 为 `Tag[]`。
 - **错误**：`401`。
 - **覆盖需求**：FR-TAX-002、FR-TAX-003（前置查询，【补充】）。
@@ -1208,9 +1434,10 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 ### 9.8 `DELETE /api/tags/{id}` 删除标签
 
 - **权限**：EDITOR、ADMIN，不限创建人；需要 CSRF。
+- **说明**：（v2.6）逻辑删除，删除后名称可重新使用。
 - **响应 200**：`data: null`。
 - **错误**：`404`、`409 TAXONOMY_IN_USE`、`401`、`403`。
-- **覆盖需求**：FR-TAX-002、BR-TAX-004、BR-TAX-005；TU-18。
+- **覆盖需求**：FR-TAX-002、BR-TAX-004、BR-TAX-005、BR-DEL-006～007；TU-18。
 
 ---
 
@@ -1232,13 +1459,15 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
   - 图片 ≤ 5 MB，音频 ≤ 20 MB（等于上限可以通过，超 1 字节拒绝）→ 否则 `400 MEDIA_TOO_LARGE`。
   - 失败时不落盘、不创建资源记录。
   - 存储文件名和响应类型以服务端判定结果为准，不采用用户的文件名和扩展名。
+  - （v2.6）保存上传时的原始文件名（去掉路径部分，截断到 255 个字符），只用于 #43 下载；为空时用 `{media_id}.{扩展名}`。
 - **响应 201**：
 
 ```json
 {
   "code": 0, "message": "OK",
   "data": { "media_id": 5001, "article_id": 102, "usage": "INLINE_IMAGE", "url": "/api/media/5001",
-            "mime_type": "image/png", "size": 230411, "linked": false, "created_at": "2026-11-14T15:00:00+08:00" }
+            "mime_type": "image/png", "size": 230411, "original_name": "架构图.png", "download_url": "/api/media/5001/download",
+            "linked": false, "created_at": "2026-11-14T15:00:00+08:00" }
 }
 ```
 
@@ -1260,7 +1489,16 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 
 - **响应 200**：文件字节流。`Content-Type` 为服务端判定的真实类型；建议加 `X-Content-Type-Options: nosniff`。**不加任何缓存头**（`Cache-Control: no-store`），确保下架后立即失效（architecture §4.3）。音频建议支持 `Range` 请求（206）。【补充】
 - **拒绝**：**一律 404**，响应与资源不存在完全一致；**不返回 401、403 或 409**。
+- **v2.6**：响应头 `Content-Disposition: inline`；音频支持 `Range` 请求（206，`ResourceRegion`）。
 - **覆盖需求**：FR-MEDIA-002、BR-MEDIA-003、BR-MEDIA-004、BR-ISO-004；TU-09、TU-10、TU-21；§4.6 第 11 条；§9.1 第 3 条。
+
+### 10.3 `GET /api/media/{media_id}/download` 媒体下载（#43，v2.6）
+
+- **说明**：课程实验二"SSM 文件上传与下载"在本项目中的延续（SRS FR-MEDIA-005）。
+- **权限判定**：与 #29 **完全相同**（同一个判权实现），匿名可访问。
+- **响应 200**：文件字节流，流式输出；`Content-Type` 为真实类型；`Content-Disposition: attachment; filename="<ASCII 兜底名>"; filename*=UTF-8''<原始文件名的百分号编码>`（RFC 5987/6266）；`Cache-Control: no-store`；`X-Content-Type-Options: nosniff`。
+- **拒绝**：**一律 404**，与 #29 一致；不返回 401、403、409。
+- **覆盖需求**：FR-MEDIA-005、BR-MEDIA-003、BR-MEDIA-008；TU-29。
 
 ---
 
@@ -1279,8 +1517,9 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `page`、`page_size` | integer | 否 | 见 §1.5 |
-| `category_id` | int64 | 否 | 按分类筛选 |
+| `category_id` | int64 | 否 | 按分类筛选；一级分类包含子分类（v2.6，BR-SEARCH-008） |
 | `tag_ids` | int64[] | 否 | 多值，**交集语义** |
+| `sort` | string | 否 | （v2.6）只允许 `published_at,desc`（默认）或 `published_at,asc`；其他 `400 SORT_FIELD_INVALID` |
 | `q` | string | 否 | 【补充·范围延伸】关键字，匹配**标题或摘要**，规则见下 |
 | `with_facets` | boolean | 否 | 【补充】默认 `false`。为 `true` 时响应 `data.facets` 返回 `PublicFacets`（§4.14）；为 `false` 或省略时 `data.facets` 为 `null`。只接受 `true` / `false`，其他取值 `400 PARAM_INVALID` |
 
@@ -1292,7 +1531,8 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 - 匹配范围：`title` **或** `excerpt` 包含该关键字（子串匹配，大小写按数据库排序规则不敏感）。**不匹配正文 `content`**，不做分词。
 - 实现口径：`LIKE '%…%'`，关键字中的 `\`、`%`、`_` 先转义（`ESCAPE '\'`），按字面匹配；不建全文索引、不引入检索引擎、不加缓存（SRS §3.2 排除正文全文检索，BR-SEARCH-001 只做模糊匹配，AGENTS §5 第 10 条不加缓存）。
 - 与 `category_id`、`tag_ids` 同时生效（AND）；`total` 基于全部条件过滤后的结果（X-ISO-03）；不影响 `facets`。
-- 与后台 #6 的 `title`（只匹配标题）是两个参数，互不替代。
+- v2.6 起后台 #6 的 `keyword`（`title` 为旧别名）与本参数匹配范围相同（标题或摘要）。
+- （v2.6）`facets.categories` 只返回**启用**分类，形如分类树（一级分类带 `children`）；文章自身的 `category` 即使已停用也照常返回名称（BR-TAX-008、决策 D7）。
 
 - **响应 200**：
 
@@ -1319,7 +1559,7 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 （上例为 `with_facets=true`；不带该参数时 `"facets": null`。）
 
 - **错误**：`400 PARAM_INVALID`（分页参数或 `with_facets` 类型错误、`q` 超长）。标签组合没有结果时返回空列表，不报错；`facets` 不受筛选影响，照常返回。
-- **覆盖需求**：FR-PUBLIC-001、BR-ISO-004、BR-SEARCH-005、BR-TAX-003（前台导航）、X-ISO-02；§4.6 第 10 条。
+- **覆盖需求**：FR-PUBLIC-001、BR-ISO-004、BR-SEARCH-005、BR-SEARCH-007～008、BR-TAX-003（前台导航）、BR-TAX-008、X-ISO-02；§4.6 第 10 条。
 
 ### 11.2 `GET /api/public/articles/{id}` 已发布文章详情
 
@@ -1355,6 +1595,7 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | FR-PUBLISH-001 / 003 | 由 §7.3 审核通过请求同步完成，不是独立任务 | 见 §7.3 响应 |
 | FR-MEDIA-003 媒体清理 | 清理被移除、替换或所属文章已删除的媒体文件；未关联上传满 24 小时后 60 秒内清理；清理前再次确认未被关联；失败记录并自动重试 | 被移除或替换的媒体在 §10.2 立即返回 404；未关联媒体超时后返回 404 |
 | FR-AUDIT-001 留痕自动生成 | 7 类流程事件与流程结果同一事务写入；删除从未提交的草稿不生成留痕 | §8.1 能查到对应留痕 |
+| FR-OPLOG-001 操作日志（v2.6） | `@OperationLog` 切面对全部后台写操作与登录登出异步写入，独立事务 | #44 能查到对应记录 |
 
 ---
 
@@ -1381,11 +1622,11 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | 17 | REVIEW | POST | `/api/articles/{id}/reject` | 驳回 | 管理员 | |
 | 18 | REVIEW | POST | `/api/articles/{id}/unpublish` | 下架 | 管理员 | |
 | 19 | AUDIT | GET | `/api/articles/{id}/audit-logs` | 文章留痕 | 归属编辑、管理员 | |
-| 20 | TAX | GET | `/api/categories` | 分类列表 | 已登录 | |
+| 20 | TAX | GET | `/api/categories` | 分类树 | `category:read`（编辑、管理员） | v2.6 改 |
 | 21 | TAX | POST | `/api/categories` | 创建分类 | 管理员 | |
-| 22 | TAX | PUT | `/api/categories/{id}` | 修改分类名称 | 管理员 | |
+| 22 | TAX | PUT | `/api/categories/{id}` | 修改分类名称与父分类 | 管理员 | v2.6 改 |
 | 23 | TAX | DELETE | `/api/categories/{id}` | 删除分类 | 管理员 | |
-| 24 | TAX | GET | `/api/tags` | 标签列表 | 已登录 | |
+| 24 | TAX | GET | `/api/tags` | 标签列表 | `tag:read`（编辑、管理员） | |
 | 25 | TAX | POST | `/api/tags` | 创建标签 | 编辑、管理员 | |
 | 26 | TAX | PUT | `/api/tags/{id}` | 修改标签名称 | 编辑、管理员 | |
 | 27 | TAX | DELETE | `/api/tags/{id}` | 删除标签 | 编辑、管理员 | |
@@ -1394,8 +1635,20 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | 30 | PUBLIC | GET | `/api/public/articles` | 已发布文章列表 | 匿名 | |
 | 31 | PUBLIC | GET | `/api/public/articles/{id}` | 已发布文章详情 | 匿名 | |
 | 32 | ARTICLE | GET | `/api/articles/counts` | 按状态计数（我的 / 全部） | 编辑、管理员 | 【补充】 |
+| 33 | USER | GET | `/api/admin/users` | 用户列表 | 管理员（`user:read`） | v2.6 |
+| 34 | USER | PUT | `/api/admin/users/{id}/status` | 启用 / 停用账号 | 管理员（`user:status`） | v2.6 |
+| 35 | USER | PUT | `/api/admin/users/{id}/role` | 分配角色 | 管理员（`user:assign-role`） | v2.6 |
+| 36 | USER | GET | `/api/roles` | 角色及其权限点（只读） | 管理员（`role:read`） | v2.6 |
+| 37 | USER | GET | `/api/permissions` | 权限点清单 | 管理员（`role:read`） | v2.6 |
+| 38 | TAX | PUT | `/api/categories/{id}/status` | 分类启停 | 管理员（`category:update`） | v2.6 |
+| 39 | TAX | PUT | `/api/categories/sort` | 同级批量排序（单事务） | 管理员（`category:update`） | v2.6 |
+| 40 | REVIEW | POST | `/api/reviews/batch-approve` | 批量审核通过 | 管理员（`review:approve`） | v2.6 |
+| 41 | REVIEW | POST | `/api/reviews/batch-unpublish` | 批量下架 | 管理员（`review:unpublish`） | v2.6 |
+| 42 | ARTICLE | POST | `/api/articles/batch-delete` | 批量删除草稿 | 编辑（`article:delete`） | v2.6 |
+| 43 | MEDIA | GET | `/api/media/{media_id}/download` | 媒体下载（附件） | 匿名（判权同 #29） | v2.6 |
+| 44 | OPLOG | GET | `/api/admin/operation-logs` | 系统操作日志 | 管理员（`oplog:read`） | v2.6 |
 
-**合计 32 个接口**：AUTH 5、ARTICLE 6、SUBMIT 3、REVIEW 5、AUDIT 1、TAX 8、MEDIA 2、PUBLIC 2。新增接口编号顺延（#32），不重排已有编号，避免引用失效。
+**合计 44 个接口**：AUTH 5、USER 5、ARTICLE 7、SUBMIT 3、REVIEW 7、AUDIT 1、OPLOG 1、TAX 10、MEDIA 3、PUBLIC 2。新增接口编号顺延（#33～#44），不重排已有编号，避免引用失效。权限点对照见 §3.4。
 
 ### 13.1 权限矩阵对照（SRS §4.5 → 接口）
 
@@ -1415,10 +1668,17 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | 上传、关联、移除、替换媒体 | #28、#9 | 草稿、驳回、已下架，否则 409 | 404 | 404 |
 | 访问媒体 | #29 | ✓（含未发布） | 仅已发布文章的当前引用 | ✓ |
 | 创建分类 | #21 | 404 | 404 | ✓ |
-| 修改、删除分类 | #22、#23 | 404 | 404 | 仅未被引用，否则 409 |
+| 修改、删除分类 | #22、#23 | 404 | 404 | 仅未被未删除文章引用，否则 409；删除另要求无子分类 |
+| 分类启停、排序 | #38、#39 | 404 | 404 | ✓ |
 | 创建标签 | #25 | ✓ | ✓ | ✓ |
 | 修改、删除标签 | #26、#27 | 仅未被引用，否则 409 | 同左 | 同左 |
-| 管理用户与角色 | 无接口 | — | — | — |
+| 批量删除草稿 | #42 | 逐条同 #10 | 逐条 404 | 404 |
+| 批量审核通过、批量下架 | #40、#41 | 404 | 404 | 逐条同 #16、#18 |
+| 下载媒体 | #43 | 同 #29 | 同 #29 | 同 #29 |
+| 用户列表、启停、分配角色 | #33～#35 | 404 | 404 | ✓（受 BR-ROLE-004/005 约束） |
+| 查看角色与权限点 | #36、#37 | 404 | 404 | ✓ 只读 |
+| 修改角色权限 | **无接口** | — | — | — |
+| 查看操作日志 | #44 | 404 | 404 | ✓ |
 | 发布文章 | **无接口** | — | — | — |
 
 ---
@@ -1433,18 +1693,21 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | FR-AUTH-002 登出 | 本期 | #4；会话失效后任意后台接口 401 |
 | FR-AUTH-003 Cookie 与 CSRF | 本期 | #1、#3、§2 |
 | FR-AUTH-004 未认证 401 与匿名入口 | 本期 | 全部后台接口（§2.3），匿名入口 #1～#3、#29～#31 |
-| FR-AUTH-005 按角色分流 | 本期 | #5 |
+| FR-AUTH-005 按权限点分流菜单 | 本期 | #5（`permissions`） |
 | FR-USER-001 编辑注册 / 管理员初始化 | 本期 | #2；管理员由数据库初始化，无接口 |
-| FR-USER-002 修改角色 | 后续 | 无（§5.6） |
-| FR-USER-003 停用启用 | 后续 | 无（§5.6） |
+| FR-USER-002 分配角色 | 本期（v2.6） | #35 |
+| FR-USER-003 停用启用 | 本期（v2.6） | #34 |
 | FR-USER-004 密码找回 | 不做 | 无，且不得提供 |
-| FR-USER-005 改派归属 | 后续 | 无（§5.6） |
+| FR-USER-005 改派归属 | 后续 | 无（§5.11） |
+| FR-USER-006 用户列表 | 本期（v2.6） | #33 |
+| FR-USER-007 角色与权限点只读 | 本期（v2.6） | #36、#37 |
 | FR-ARTICLE-001 创建草稿 | 本期 | #7 |
 | FR-ARTICLE-002 编辑文章 | 本期 | #9 |
 | FR-ARTICLE-003 我的文章列表 | 本期 | #6（编辑）；#32 计数 |
 | FR-ARTICLE-004 文章详情 | 本期 | #8 |
 | FR-ARTICLE-005 删除草稿 | 本期 | #10 |
 | FR-ARTICLE-006 全部文章列表 | 本期 | #6（管理员）；#32 计数 |
+| FR-ARTICLE-007 批量删除草稿 | 本期（v2.6） | #42 |
 | FR-SUBMIT-001 提交审核 | 本期 | #11 |
 | FR-SUBMIT-002 撤回 | 本期 | #12 |
 | FR-SUBMIT-003 改期 | 本期 | #13 |
@@ -1452,22 +1715,30 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | FR-REVIEW-002 审核通过 | 本期 | #16（#15 辅助） |
 | FR-REVIEW-003 驳回 | 本期 | #17（#15 辅助） |
 | FR-REVIEW-004 下架 | 本期 | #18 |
+| FR-REVIEW-005 批量审核通过 | 本期（v2.6） | #40 |
+| FR-REVIEW-006 批量下架 | 本期（v2.6） | #41 |
 | FR-PUBLISH-001 立即发布 | 本期 | #16 同步完成 |
 | FR-PUBLISH-002 到期自动发布 | 本期 | 系统任务（§12），无接口 |
 | FR-PUBLISH-003 写入实际发布时间 | 本期 | #16 + 系统任务 |
 | FR-TAX-001 分类 | 本期 | #20～#23 |
 | FR-TAX-002 标签 | 本期 | #24～#27 |
 | FR-TAX-003 为文章设分类标签 | 本期 | #7、#9（#20、#24 辅助） |
+| FR-TAX-004 分类树 | 本期（v2.6） | #20 |
+| FR-TAX-005 分类启停 | 本期（v2.6） | #38 |
+| FR-TAX-006 分类批量排序 | 本期（v2.6） | #39 |
 | FR-MEDIA-001 上传与关联 | 本期 | #28 上传；#9 关联、移除、替换 |
 | FR-MEDIA-002 媒体访问控制 | 本期 | #29 |
 | FR-MEDIA-003 媒体清理 | 本期 | 系统任务（§12），无接口 |
 | FR-MEDIA-004 正文链接校验 | 本期 | #7、#9（§6.0） |
+| FR-MEDIA-005 媒体下载 | 本期（v2.6） | #43 |
 | FR-AUDIT-001 留痕自动生成 | 本期 | #11、#12、#13、#16、#17、#18 + 系统任务 |
 | FR-AUDIT-002 查看留痕 | 本期 | #19 |
+| FR-OPLOG-001 操作日志写入 | 本期（v2.6） | `@OperationLog` 切面（§12） |
+| FR-OPLOG-002 操作日志查询 | 本期（v2.6） | #44 |
 | FR-PUBLIC-001 公开列表 | 本期 | #30（`q` 关键字为范围延伸，见 §15 冲突 7） |
 | FR-PUBLIC-002 公开详情 | 本期 | #31 |
 
-37 条功能需求全部有归属：33 条本期需求由接口或系统任务承接，4 条（FR-USER-002～005）按 SRS 不设计接口。
+48 条功能需求全部有归属：46 条本期需求由接口或系统任务承接，2 条（FR-USER-004 不做、FR-USER-005 后续）按 SRS 不设计接口。
 
 ### 14.2 横切需求 → 接口
 
@@ -1482,6 +1753,7 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | X-AUDIT-01 七类留痕 | §12、§8 |
 | X-AUDIT-02 留痕不可改删 | 无修改、删除留痕接口 |
 | X-AUDIT-03 留痕查询受隔离 | #19 |
+| X-DEL-01 排除已逻辑删除数据（v2.6） | 全部列表、详情、计数、引用判定与公开接口；`@TableLogic` + 手写 SQL 显式 `deleted = 0` |
 
 ### 14.3 必须失败的组合（SRS §4.6）→ 接口行为
 
@@ -1504,6 +1776,11 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | 15 | 重复提交审核 | #11 → 409 |
 | 16 | 通过筛选或计数推断他人文章 | #6 只算本人结果集 |
 | 17 | 正文含 HTML、外部图片、危险协议 | #7、#9 → 400 CONTENT_REJECTED |
+| 18 | 编辑调用用户管理、角色权限、操作日志 | #33～#37、#44 → 404 |
+| 19 | 停用或降级最后一个启用管理员、操作自己 | #34、#35 → 409 LAST_ADMIN |
+| 20 | 提升名下有文章的编辑 | #35 → 409 ROLE_CHANGE_FORBIDDEN |
+| 21 | 批量为空或超过 50 条 | #39～#42 → 400 BATCH_SIZE_INVALID |
+| 22 | 文章选用停用分类 | #7、#9 → 400 CATEGORY_DISABLED |
 
 ---
 
@@ -1516,10 +1793,10 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | 3 | architecture §6.1 到期发布 SQL 曾带 `published_at IS NULL`，INV-07 曾写「一旦非空永不被覆盖」；与 SRS §5.5、BR-PUB-006 冲突 | **已按 SRS 对齐（2026-11-16）**：去掉该条件；同周期靠状态门闩 + 无发布留痕防重复；跨周期允许更新 `published_at` |
 | 4 | architecture §6.2 曾写孤儿文件「超过 N 天」才清理；与 BR-MEDIA-004 的 24 小时／60 秒口径冲突 | **已按 SRS 对齐（2026-11-16）**：见 architecture §6.2 与本文 §12 |
 | 5 | architecture §5.4 曾在「已发布即回写」前未区分从未关联／已失去引用；与 FR-MEDIA-002 冲突 | **已按 SRS 对齐（2026-11-16）**：见 architecture §5.4 与本文 §10.2 |
-| 6 | architecture §5.1 曾用 `CookieCsrfTokenRepository`；SRS §4.1.2 要求会话绑定令牌 | **已按 SRS 对齐（2026-11-16）**：改为 `HttpSessionCsrfTokenRepository`，由 `#1` 下发；接口仍用 `X-XSRF-TOKEN` |
+| 6 | architecture §5.1 曾用 `CookieCsrfTokenRepository`；SRS §4.1.2 要求会话绑定令牌 | **已按 SRS 对齐（2026-11-16）**：改为会话绑定令牌，由 `#1` 下发；接口仍用 `X-XSRF-TOKEN`。2026-11-23 起不用 Spring Security，实现改为自定义 `CsrfInterceptor`（决策 T2），契约不变 |
 | 7 | `project-overview.md` 写「公开文章接口支持按状态、分类、标签、归属编辑筛选及标题模糊匹配」；SRS FR-PUBLIC-001 只规定分页和分类、标签筛选，并禁止任何状态参数 | 不接受状态、归属编辑等任何影响可见性的参数（INV-10）。**2026-11-16 起**，A 决定把博客前台搜索作为范围延伸：#30 增加关键字 `q`，只匹配标题与摘要，`LIKE` 转义、无索引无缓存，不检索正文（§11.1）【补充·范围延伸】；SRS 不改 |
 | 8 | `project-overview.md` 写留痕只有 6 类（缺「到期自动发布」）；SRS §6.6 为 7 类 | 按 SRS，7 类 |
-| 9 | architecture §4.1 规定 `article.status` 存中文字面量 | 数据库存中文不影响接口；接口用英文枚举，由后端映射（§4.1） |
+| 9 | architecture §4.1 曾规定 `article.status` 存中文字面量 | **已结案（2026-11-23）**：数据库改存英文代码，与接口一致，不再映射（`doc/db/schema.md` §1、architecture §4.1） |
 | 10 | BR-TAX-003 要求分类用于「前台导航与面包屑」，但公开出口只有文章列表与详情（FR-PUBLIC-001/002），FR-AUTH-004 与 §9.2 FR-AUTH 验收①也把匿名入口限定为登录、注册、公开文章列表与详情、媒体出口；新增匿名路径会超出该清单 | **不新增路径**（2026-11-16，A 决定）：在 #30 增加 `with_facets`，返回全部已发布文章引用的分类、标签（`PublicFacets`，§4.14）。仍在 FR-PUBLIC-001 出口内，只含 §8.2 已公开的分类、标签 ID 与名称【补充】 |
 
 ---
@@ -1529,18 +1806,46 @@ SRS §4.1.2 规定了 认证 → CSRF → 三道闸门 的顺序。本规范把�
 | # | 问题 | 本规范的暂定处理 |
 |---|---|---|
 | 1 | 草稿能否缺少标题、正文、分类？SRS §7.2 标为必填，FR-ARTICLE-002 规定编辑时缺失返回 400；但 FR-SUBMIT-001 又有「必填内容缺失返回 400」，暗示草稿可能不完整 | **已决（2026-11-16，按 SRS）**：创建和编辑都要求三项必填（§7.2「必填」、FR-ARTICLE-002 异常「标题或正文为空、或未指定分类返回 400」）；提交时再查一次（`ARTICLE_INCOMPLETE` 基本不会触发）。放开需重开 SRS 版本 |
-| 2 | 分类、标签名称的长度、是否去首尾空白、是否允许重名、重名是否区分大小写 | 去首尾空白，1～50 字符，同类内不区分大小写去重，重名 409 |
-| 3 | 标题、摘要、正文长度上限；每篇标签数量上限 | 未设上限，建议标题 ≤ 200、摘要 ≤ 500、正文 ≤ 1 MB |
+| 2 | 分类、标签名称的长度、是否去首尾空白、是否允许重名、重名是否区分大小写 | **已决（2026-11-23）**：去首尾空白，1～50 字符，同类内不区分大小写唯一，重名 `409 NAME_DUPLICATE`（`doc/db/schema.md` §4.3） |
+| 3 | 标题、摘要、正文长度上限；每篇标签数量上限 | **已决（2026-11-23）**：标题 ≤ 200 字符、摘要 ≤ 500 字符、正文 ≤ 1 MiB（UTF-8 字节）、驳回意见与下架原因 ≤ 500 字符，超出 `400 PARAM_INVALID`；每篇标签数暂不限 |
 | 4 | 博客前台导航需要分类列表（BR-TAX-003「用于前台导航与面包屑」），但公开白名单只定义了文章列表和详情两个出口 | **已决（2026-11-16）**：不新增公开分类 / 标签接口；#30 增加 `with_facets`，返回全部已发布文章引用的分类与标签（§4.14 `PublicFacets`、§15 冲突 10） |
 | 5 | 接口层状态等枚举用英文还是中文；JSON 字段用 snake_case 还是 camelCase | 英文枚举 + snake_case |
-| 6 | 400 和 409 同时成立时谁优先（如对待审核文章提交一个空标题的编辑） | 角色、归属 404 → 请求格式 400 → 状态 409（§2.3）；删除的二次确认按 SRS 放在 409 之后 |
-| 7 | 登录名存储与返回是保留原样（去空白后）还是统一小写 | 统一小写返回 |
-| 8 | 后台文章列表的默认排序（SRS 只规定了审核队列的排序） | `updated_at` 降序；公开列表 `published_at` 降序 |
+| 6 | 400 和 409 同时成立时谁优先（如对待审核文章提交一个空标题的编辑） | 角色、归属 404 → 请求格式 400 → 状态 409（§2.3）；删除的二次确认按 SRS 放在 409 之后。**v2.6 注意**：权限闸改为切面后，请求体格式 400 在权限 / 归属 404 之前，见 #17 |
+| 7 | 登录名存储与返回是保留原样（去空白后）还是统一小写 | **已决（2026-11-23）**：只存小写规范形式，返回也是它 |
+| 8 | 后台文章列表的默认排序（SRS 只规定了审核队列的排序） | `updated_at` 降序；公开列表 `published_at` 降序。v2.6 起支持多字段 `sort`（BR-SEARCH-007） |
 | 9 | 正文里怎样认定一个链接是「视频链接」？SRS 要求视频链接必须是绝对 https、相对路径的视频链接要拒绝，但又允许普通链接用站内相对地址，而 Markdown 语法上两者没有区别 | **已决（2026-11-16）**：按目标路径扩展名认定，`.mp4` / `.webm` / `.ogg` 即视频链接，必须绝对 https，否则 400（§6.0 规则 5）；博客前台对这类链接内嵌 `<video controls preload="metadata">`，不自动播放、不用 iframe |
 | 10 | 公开详情里的「正文图片引用、正文视频链接」是否需要单独字段 | 只包含在 `content` 原文中，不单独抽出 |
-| 11 | 是否需要文章编辑的乐观锁（两个标签页同时编辑同一篇文章，后写覆盖前写） | 未加。可选方案：请求带 `expected_updated_at`，不一致返回 409 |
+| 11 | 是否需要文章编辑的乐观锁（两个标签页同时编辑同一篇文章，后写覆盖前写） | **已决（2026-11-23）**：加。`article.version`（MyBatis-Plus `@Version`），#9 必带 `expected_version`，不一致 `409 VERSION_CONFLICT`（§6.4）；不用 `expected_updated_at`，避免毫秒精度与时区换算问题 |
 | 12 | 权限矩阵里的「计数」是否需要单独接口（如按状态统计数量的标签页角标） | **已决（2026-11-16）**：新增 #32 `GET /api/articles/counts`（§6.9），与 #6 同一套归属过滤；列表项同时增加 `allowed_actions`（§4.11） |
 | 13 | 编辑是否应看到分类、标签的 `in_use` | 返回布尔值不返回计数；编辑本来就能通过 409 得知是否被引用 |
-| 14 | 审核标准版本从哪里配置、怎样升级 | 服务端配置项，#15 只读展示 |
+| 14 | 审核标准版本从哪里配置、怎样升级 | **已决（2026-11-23）**：`review_standard` 表登记，升级 = 追加一条 Flyway INSERT 迁移；#15 只读展示 |
 | 15 | 正文图片引用是否允许同一篇文章里重复引用同一个媒体 | 允许 |
 | 16 | 管理员能否按状态等条件筛选审核队列以外的列表 | 可以，#6 对管理员开放全部筛选 |
+| 17 | （v2.6）权限闸改为 AOP 切面后，请求体格式 400 会先于权限 / 归属 404（§2.3 末条） | 暂定接受新顺序（不泄露资源存在性）；若要保持 404 优先，备选是 Controller 不用 `@Valid`、在切面之后的 Service 入口手动校验，代价是校验分散。由 A 与 B 在 M1 前确认 |
+
+---
+
+## 17 v0.2（SRS v2.6）改动清单
+
+**新增接口 #33～#44**：见 §13。
+
+**改动的 16 个接口**（12 行，同类合并）：
+
+| # | 改动 |
+|---|---|
+| #2 注册 | 写入 `role_id` = EDITOR、`status` = ENABLED；响应多出 §4.2 新字段 |
+| #3 登录 | 停用账号按 `401 LOGIN_FAILED` 统一失败；成功、失败都记操作日志 |
+| #5 当前用户 | 增加 `role_name`、`status`、`updated_at`、`permissions[]` |
+| #6 文章列表 | 新增 `keyword`（标题或摘要，`title` 降为别名）、三组时间范围、多字段 `sort`；一级分类含子分类 |
+| #9 编辑（#7 同） | 选用停用分类 `400 CATEGORY_DISABLED` |
+| #10 删除 | 改为逻辑删除，其余规则不变 |
+| #20 分类列表 | 返回树形 `{id, name, parent_id, sort_order, status, in_use, children[]}`；`?status=ENABLED` |
+| #21～#23 分类写 | 创建带 `parent_id`、`sort_order`；修改可改父分类（受引用保护）；删除为逻辑删除，有子分类 `409 CATEGORY_HAS_CHILDREN` |
+| #24 / #27 标签 | 列表加 `sort`；删除为逻辑删除 |
+| #28 上传 | 保存并返回 `original_name`、`download_url` |
+| #30 公开列表 | 分类导航只含启用分类树；一级分类含子分类；`sort` 仅允许 `published_at` |
+| #32 计数 | 筛选参数与 #6 对齐：加 `keyword`（`title` 为别名）与三组时间范围，一级分类含子分类 |
+
+**新增错误码 7 个**：`40015 CATEGORY_DISABLED`、`40016 CATEGORY_DEPTH_EXCEEDED`、`40017 BATCH_SIZE_INVALID`、`40018 SORT_FIELD_INVALID`、`40908 CATEGORY_HAS_CHILDREN`、`40909 LAST_ADMIN`、`40910 ROLE_CHANGE_FORBIDDEN`。权限不足仍为 `404 40400`。
+
+**前端随后要改（A）**：`/admin` 菜单改按 #5 的 `permissions` 显示；分类管理改树形并加启停、排序；文章列表改用 `keyword` 与新 `sort` 格式；批量操作按钮（#40～#42）；用户管理页（#33～#35）；操作日志页（#44）；媒体下载按钮（#43）；contract mock 同步新增字段与接口。

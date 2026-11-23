@@ -8,21 +8,21 @@
 
 ## Current Phase
 
-**实现准备 —— 需求基线、架构基线与接口草案已产出，尚未进入代码实现。**
+**实现准备 —— 需求基线 v2.6（补齐课程评分项）、架构基线、接口草案 v0.2 与 16 张表的表结构已产出，即将进入后端 M0。**
 
-`src/` 仍为空：无后端代码、无数据库 schema。`web/` 已有博客前台公开页（首页、分类页、搜索页、文章详情、统一 404），开发期由契约 mock 供数，尚未对接真实后端。`doc/api/` 已有接口规范草案。
+`src/` 仍为空：无后端代码。表结构为 16 张表（`doc/db/schema.md` v2，2026-11-23，PR #8 审核中），Flyway 迁移尚未写。`web/` 已有博客前台公开页（首页、分类页、搜索页、文章详情、统一 404）和管理员后台（PR #6、#7），开发期由契约 mock 供数，尚未对接真实后端。分工见 `doc/context/team-division.md`。
 
 **2026-09-29 方向调整：`CMS-SRS.md` 转为主文档。** 此前的方向是绕的——SRS 抬头写"导出版本、请勿直接修改，内容的唯一事实来源为 `doc/context/project-overview.md`"，而 project-overview 又反过来写"发生表述冲突时以 SRS 为准"。两头互相指认，谁也定不了谁是源。
 
-**当前需求基线：`CMS-SRS.md` v2.5（2026-10-19，需求基线冻结版）。** SRS 已明确为唯一对外交付主文档；`project-overview.md` 仅为背景与取舍记录。内部架构和旧记录不得覆盖当前 SRS 的规则。
+**当前需求基线：`CMS-SRS.md` v2.6（2026-11-23，在 v2.5 冻结基线上补齐课程评分项：RBAC、AOP 权限与操作日志、多级分类、批量、逻辑删除、媒体下载）。** SRS 已明确为唯一对外交付主文档；`project-overview.md` 仅为背景与取舍记录。内部架构和旧记录不得覆盖当前 SRS 的规则。
 
 ## Current Goal
 
-依据 SRS v2.5 与 `doc/api/api-spec.md` 草案推进实现准备：收口 api-spec §16 待确认问题、补齐表字段级定义，然后进入后端脚手架与 Flyway。架构已按 SRS 修正到期发布幂等与媒体清理／判权口径（见 Completed）。
+按 `doc/context/team-division.md` 进入后端 M0：B 先合入 M0 最小骨架（WAR 在 Tomcat 10.1 启动、`DataSource` 连通、Flyway Bean 迁移、`GET /api/health`，architecture §2.10），之后其他人并行开工，登录与 CSRF 拦截器、两个切面和归属 scope（F）放到 M1；H 写 `common/`（含 Jackson、校验器与 404 映射）、各表所有者按 `doc/db/schema.md` 写 V1～V11。本阶段不安排测试。v2.6 新增章节由 A 用自己的话改写定稿（`doc/ai-log/README.md`）。
 
 ## Completed
 
-**需求基线** —— `CMS-SRS.md` v2.5；`doc/context/project-overview.md` 为背景记录。v2.5 修正六项 P1 复审发现并冻结基线（审核-发布责任与原子性、列表最近驳回/下架展示、正文图片引用与危险协议、留痕字段条件必填、媒体真实格式校验、会话安全基线）。
+**需求基线（历史：v2.5 冻结记录；当前基线为 v2.6，见上文）** —— `CMS-SRS.md` v2.5；`doc/context/project-overview.md` 为背景记录。v2.5 修正六项 P1 复审发现并冻结基线（审核-发布责任与原子性、列表最近驳回/下架展示、正文图片引用与危险协议、留痕字段条件必填、媒体真实格式校验、会话安全基线）。
 - 62 条业务规则（10 组）、6 个文章状态、11 条状态迁移路径、5 条禁止路径、1 条全流程不变量、7 类留痕、17 条必须失败的组合
 - 测试环境账号口径：内容编辑可注册入口直接注册并立即启用；管理员不开放注册，每库初始化时创建且仅一个；不提供密码找回/邮件验证/自助改密
 - 媒体口径：图片 `jpg/jpeg/png/gif/webp` 单文件 5MB（**明确排除 `svg`**）、音频 `mp3/m4a/wav/ogg` 单文件 20MB 走上传、视频**只存 `https` URL**（不限来源域名，禁 HTML/脚本/iframe/嵌入代码，不下载不代理不转码）
@@ -78,20 +78,42 @@
 - §6.1 到期发布去掉 `published_at IS NULL`；INV-07 改为「同周期不覆盖、跨周期更新」
 - §6.2 媒体清理改为未关联满 24 小时／60 秒内清理，并覆盖移除、替换、删文
 - §5.4 媒体判权补「从未关联」与「已失去全部引用」两类
-- §5.1 CSRF 改为会话绑定令牌（`HttpSessionCsrfTokenRepository`）
+- §5.1 CSRF 改为会话绑定令牌（当时用 `HttpSessionCsrfTokenRepository`；2026-11-23 起不用 Spring Security，改为自定义 `CsrfInterceptor`，契约不变）
+
+**2026-11-17～23 管理员后台**（`web/`，PR #6、#7 已合入）
+- 审核队列与详情、全部文章与下架、留痕时间线、分类与标签管理；路由按角色声明并统一守卫，菜单随会话切换
+- 实现说明见 `doc/frontend/admin-console-impl.md`
+
+**2026-11-23 SRS v2.6 补齐课程评分项**（PR #8 追加提交；A 批准方案，D1～D12 全部按推荐）
+- SRS：RBAC（`role`/`permission`/`role_permission`，27 个权限点，一人一角色 `user.role_id`）、用户管理（启停、分配角色，至少一个启用管理员）、`@RequiresPermission` AOP 权限闸（仍统一 404）、`@OperationLog` + `sys_operation_log`、两级分类（排序、启停）、批量审核通过 / 下架 / 删除草稿（≤ 50，逐条独立事务）、文章 / 分类 / 标签逻辑删除、多字段排序白名单、MP 自动填充、媒体下载 #43（实验二延续）；90 条业务规则（14 组）、48 条功能需求（本期 46）、33 条越权与边界用例
+- 表结构 v2：16 张表、迁移重排为 V1～V11 + `R__app_grants`；MySQL 8.4.6 空库重跑 51 项正反例全部通过（schema 附录 A.1；2026-11-23 修订 `ck_oplog_error` 后重跑 52 项，全部通过）
+- 接口 v0.2：44 个接口（新增 #33～#44），11 处已有接口改动，7 个新错误码；`openapi.yaml` 经 Redocly lint 通过
+- 架构：权限闸改为 AOP 切面、切面顺序（日志 `@Order(1)` 在外）、批量事务边界、系统架构图与鉴权链 mermaid
+- 分工：每人表数 A6 B6 C9 D9 E5 F4 G7 H6；B 权限切面 + RBAC、H 日志切面、G 用户管理；后端 PR 改 merge commit（D9）；新增 `doc/ai-log/` 过程记录规范与 `doc/design/README.md` 图清单
+
+**2026-11-23 表结构定稿（折中版，v1，已被 v2 取代）** —— `doc/db/schema.md` + `doc/db/schema-reference.sql`
+- 12 张表：`user`、`login_throttle`、`category`、`tag`、`article`、`article_tag`、`media_format`、`media_file`、`media_purge_job`、`reject_category`、`review_standard`、`audit_log`；按 BCNF 论证，保留 4 处受控冗余并写明理由
+- 在本地 MySQL 8.4.6 上验证：V1～V9 与 `R__app_grants` 全部执行成功；49 条应被拒绝的写入全部被拒；6 条"库里放行、靠服务层挡"的写入按设计放行
+- api-spec §16 #2、#3、#7、#11、#14 与 §15 冲突 9 结案；新增错误码 `409 40907 VERSION_CONFLICT`
 
 ## In Progress
 
-**接口草案待团队确认**：`api-spec.md` §16 共 16 个问题，1、4、9、12 已决，其余待确认；后端代码尚未开始。
+**PR #8（SRS v2.6 与 16 表设计）待审核合并**。
 
-**前台联调待后端**：博客前台目前只跑在契约 mock 上；C / E 交付公开接口（含 `with_facets`、`q`）后，按 `web/mock/handlers.test.js` 的用例对一遍真实接口。登录 / 注册页与后台由 F / G 接着做。
+**接口草案待团队确认**：`api-spec.md` §16 共 17 个问题，1、2、3、4、7、9、11、12、14 已决，其余维持暂定处理（#17 是 v2.6 新增：AOP 权限闸后格式 400 先于 404）；后端代码尚未开始。
+
+**A 待办（v2.6）**：亲自改写 SRS v2.6 新增章节并填写 `doc/ai-log/A/00-前期文档与前端说明.md`；跟老师确认技术栈名称（D12）。
+
+**前端跟进契约变更（A）**：编辑页要在 #9 带上 `expected_version` 并处理 `40907`；mock 同步补 `version` 字段。v2.6 另需：#5 权限列表驱动菜单、分类树、批量操作按钮、用户管理页、操作日志页、下载按钮，#6 排序参数改为 `字段,方向`、`title` 改 `keyword`（api-spec §17）。
+
+**前台联调待后端**：博客前台目前只跑在契约 mock 上；C / E 交付公开接口（含 `with_facets`、`q`）后，按 `web/mock/handlers.test.js` 的用例对一遍真实接口。登录 / 注册页、编辑端由 A 接着做（2026-11-23 起前端全部归 A）。
 
 ## Next Up
 
-1. 收口 `doc/api/api-spec.md` §16 剩余待确认问题（一次一个，给具名选项）
-2. 各数据库表的字段级定义 —— 目前只有 `audit_log` 的操作人列寄存在 architecture §4.1
+1. 后端 M0：工程骨架、`common/` 与两个注解、V1～V11 与 `R__app_grants`、MP `delval = "id"` 验证（`team-division.md` §2.4、§4）
+2. §16 剩余暂定项（#5、#6、#8、#10、#13、#15、#16）按暂定处理实现，有异议再开 Issue
 3. 补 `doc/context/ui-context.md`、`code-standards.md`、`ai-workflow-rules.md`（CLAUDE.md 清单里仍指向它们，且路径过时）
-4. 后端脚手架：Spring Boot 3 + 包结构 + Flyway 初版 + Testcontainers 冒烟
+4. 测试补齐（M5，暂缓）：越权用例、Testcontainers、源码扫描
 5. 非功能需求（性能、并发、可用性、日志监控、定时扫描间隔与失败重试）—— 部分已在 SRS／architecture，仍可补独立小节
 6. 回补 `doc/reference/chatgpt-srs-conversation.md` —— **用户已表示暂不处理**
 
@@ -99,13 +121,17 @@
 
 | # | 事项 | 状态 |
 |---|---|---|
-| 1 | SRS 转主文档后 `project-overview.md` 的定位 | **已落实：降为背景与取舍记录**，SRS v2.5 为唯一需求基线 |
+| 1 | SRS 转主文档后 `project-overview.md` 的定位 | **已落实：降为背景与取舍记录**，SRS（现 v2.6）为唯一需求基线 |
 | 2 | SRS 里**没有**的两块内容怎么处置：**12 步端到端核心流程**、**11 条成功标准（"什么情况算完成"）**——目前只存在于 `project-overview.md` | **仍未处置**。① 定下后 `architecture.md` 已不再引用这两块（改指 SRS §9.1 第 1~3 条与 §1.4/§4.1.1、§8.2），但它们是否并进 SRS 本身仍待定 |
 | 3 | 账号来源、密码找回/邮件验证、归属编辑离职后文章改派 | 本期账号来源与登录规则已定，见 SRS §4.1.1；找回、邮件验证不做，改派仍为后续版本 |
 | 4 | 本期是否采集邮箱 | SRS v2.5 已明确不采集邮箱、手机号；不作为注册或登录标识 |
 | 5 | `.claude/claude.md` 里的清单仍指向旧 `context/` 路径，且列了 3 个不存在的文件、又缺 `git-standards.md` | **需手工更正**（受保护目录，会话内无权修改） |
 | 6 | 追溯脚本停用 ⇒ 文档之间再没有自动发现漂移的手段 | 已知代价，用户明示"先不用" |
 | 7 | 留痕表里的「改期」是否需要留痕 | 这是推断后补上的（它改变了文章对外可见的时间点），基线已标注待复核，用户尚未明确确认 |
+| 8 | 技术栈名称（D12、T9）：报告写"Spring 6 + Spring MVC + MyBatis-Plus（不用 Spring Boot、Spring Security），基于实验二 SSM 升级"能否被老师接受 | 未决，A 跟老师确认（2026-11-23 技术栈已改，见决策记录） |
+| 9 | AOP 权限闸后，请求体格式 400 先于权限 / 归属 404（api-spec §16-#17） | 暂定接受，A、B 在 M1 前确认 |
+| 10 | `@TableLogic(delval = "id")` 在所用 MP 版本是否生效 | B 在 M0 验证；不行用 `setSql("deleted = id")` |
+| 11 | JDK 版本：architecture 写 Java 21，v2.6 方案的部署说明写 JDK 17 | **已决（2026-11-23，T6）**：JDK 21 + Spring Framework 6.2 + Tomcat 10.1 |
 
 ## Architecture Decisions
 
@@ -124,9 +150,13 @@
 否决：Nginx 直托管 + UUID 不可猜路径（"猜不到"不是"不可访问"，与 BR-MEDIA-003 正面冲突）；Nginx `X-Accel-Redirect`（生产标准解，但为性能引入环境复杂度）。
 代价：文件 IO 经过 JVM，音频 20MB 会占用请求线程。
 
-**认证与授权分界：Spring Security 只管认证，三道闸门自研在单一 `AuthzInterceptor`**。
+**技术栈改为纯 Spring + Spring MVC + MyBatis-Plus，不用 Spring Boot、Spring Security（2026-11-23，决策 T1～T9）。** `web.xml` + Java 配置类、单一 `DispatcherServlet` 容器（T3、T7）；WAR 部署到 Tomcat 10.1（T4）；Flyway 作为 Spring Bean 在启动时迁移（T5）；Spring 6.2 + JDK 21（T6）；认证用 `AuthInterceptor`（每请求按 `user_id` 查状态与角色），CSRF 用 `CsrfInterceptor` 校验会话绑定令牌（T2），BCrypt 只用 `spring-security-crypto`（T1）；#36/#37 移给 G，Jackson / 校验 / 404 映射移给 H（T8）；老师确认待 A 完成（T9）。见 architecture §2.10、§5.1。
+理由：更贴合「基于实验二 SSM 整合升级」，答辩可以讲清每个 Bean 怎么装配；认证与 CSRF 自研后，拦截器与 AOP 的分工本身就是课程要展示的 Spring 知识点。
+代价：**推翻了下一条里「否决：全自研 Filter + 手写 CSRF」**——会话、CSRF、会话固定这些安全细节要自己写对，写错不报错；没有自动配置，切面、事务、异步漏配会静默失效。对策见 team-division R18、R19（启动时断言 Controller 已被代理、B 的 PR 重点审并附手工验证记录）。
+
+**认证与授权分界（2026-11-23 前的记录；认证一侧已被上一条替换为拦截器）：Spring Security 只管认证 / 会话 / CSRF；授权走自研 AOP**（v2.6 起：权限闸 = `@RequiresPermission` + `PermissionAspect`，归属闸 = scope + MP 拦截器，状态闸 = 状态机条件 UPDATE；v2.5 曾是单一 `AuthzInterceptor`）。
 理由：状态闸不适合写成注解表达式，判定一旦散到注解、Service 与框架配置三处，"权限判断只有一处"这个可证明性根基就没了。本项目对外演示的核心恰恰是这套权限模型。
-否决：全量 Spring Security；全自研 Filter + 手写 CSRF（三样安全细节要自己写对，写错不报错）。
+否决：全量 Spring Security；~~全自研 Filter + 手写 CSRF（三样安全细节要自己写对，写错不报错）~~（2026-11-23 被技术栈调整推翻，见上一条）。授权仍只在 AOP 切面判，这一点不变。
 
 **拒绝响应一律 404，且响应体与"资源不存在"逐字节一致。**
 理由：若角色闸返 403、归属闸返 404，攻击者仅凭状态码就能分辨"这篇文章存在但不是你的"，等于泄露存在性。**401 只保留给"根本没登录"**——它不携带任何目标资源信息，攻击者从自己的登录态本来就知道自己没登录。
@@ -134,20 +164,27 @@
 **正文只存 Markdown 原文，绝不存渲染后的 HTML**；后端对正文字段不解析、不渲染、不做消毒——**一旦开始消毒，就等于承认这里可以进 HTML**。视频只存 `https` URL，只做协议校验，不判断链接目标内容。
 
 **调度：`@Scheduled` + 单实例，幂等靠 SQL 不靠调度器。**
-每篇文章的发布是一条带完整条件的 UPDATE：`status='待发布' AND scheduled_publish_time<=now AND published_at IS NULL`。即使意外起了第二个进程也不会重复发布或覆盖 `published_at`。整批使用**同一个** `now` 值（应用传入），不用 SQL `NOW()`。
+每篇文章的发布是一条带完整条件的 UPDATE：`status='SCHEDULED' AND scheduled_publish_time<=now`（2026-11-16 已去掉 `published_at IS NULL`，见 architecture §6.1）。同周期防重复靠"本周期无到期发布留痕"，并由 `audit_log.related_approval_id` 唯一键兜底。整批使用**同一个** `now` 值（应用传入），不用 SQL `NOW()`。
 否决 Quartz 与任何"发布任务表"——那会引入第二处任务状态来源，"任务已完成但文章未发布"这类不一致没有业务含义，只会制造排查成本。
 
 **部分不变量不靠代码自觉，而是降级为结构约束**（本项目最有分量的一组决策）：
 - `audit_log` 只增不改不删 → 降级为 **MySQL 表级权限**，应用账号只有 `INSERT`/`SELECT`。只靠"我们没写删除接口"的话，下次有人为了排查问题手写一条 SQL、或加个批量维护接口，约束就没了。
-- 仅"无留痕的草稿"可删 → 降级为 **`audit_log.article_id` 外键 `ON DELETE RESTRICT`**，数据库层直接挡住，应用层不必再查一次。
-- `audit_log` 操作人双主体 → 降级为 **CHECK `(actor_type='USER') = (actor_id IS NOT NULL)`**。外键 `RESTRICT` 的连带结论：只要一个账号还留着任何一条留痕就删不掉 ⇒ 将来实现「账号停用」只有停用一条路，删账号在结构上不可行。这不是新加的规则，是外键自带的。
-- 越权测试跑 **Testcontainers 真 MySQL**，不用 H2——表级权限、`ON DELETE RESTRICT`、窗口函数这三样 H2 都不完整实现，在 H2 上跑通证明不了任何事。
+- 仅"无留痕的草稿"可删 → v2.5 降级为 **`audit_log.article_id` 外键 `ON DELETE RESTRICT`**；**v2.6 改为逻辑删除后外键不再起作用**，改由 Service 显式 `NOT EXISTS` 检查 + `ck_article_deleted`（只有草稿能被标记删除）+ 应用账号没有 `article` 的 `DELETE` 权限兜底。
+- `audit_log` 操作人双主体 → 降级为 **CHECK `(actor_type='USER') = (actor_id IS NOT NULL) AND (actor_type='SYSTEM') = (action='AUTO_PUBLISH')`**。外键 `RESTRICT` 的连带结论：只要一个账号还留着任何一条留痕就删不掉 ⇒ 将来实现「账号停用」只有停用一条路，删账号在结构上不可行。这不是新加的规则，是外键自带的。
+- 越权测试跑 **Testcontainers 真 MySQL**，不用 H2——表级权限、`ON DELETE RESTRICT`、窗口函数这三样 H2 都不完整实现，在 H2 上跑通证明不了任何事。（选型不变；2026-11-23 起测试整体暂缓到 M5。）
+
+**表结构：16 张表按 BCNF 定稿，约束分两层**（2026-11-23，A 批准折中版 12 张，同日 v2.6 扩为 16 张：RBAC 三表 + `sys_operation_log`；详见 `doc/db/schema.md` §0、§12）。
+- 采用：登录失败计数单独建 `login_throttle`（不存在的登录名也要计数，不能挂 `user` 外键）；`media_format` 字典消除 MIME 的传递依赖；驳回类别与审核标准版本建字典表（审核标准从配置项改为表）；枚举存英文代码，不做中英映射；去掉 `article.submitted_at`（由提交留痕派生）；`article.version` 乐观锁 + `expected_version`。
+- 简化：`media_purge_job` 只记失败、`@Scheduled` 重试；`audit_log` 只留 3 条关键条件 CHECK，其余条件必填由 `AuditWriter` 校验（AUD-01～08）；自引用外键只做普通外键 + 唯一键，"同文章、同类型"在服务层校验。
+- 否决：去掉 `actor_type`（会让 CHECK 写不出来、查询要反推动作）；去掉封面 / 音频外键（改成 V9 单独加）；生成列与函数索引（课程项目里可读性代价大于收益）；`audit_action` 动作字典表。
+
+**分工调整**（2026-11-23，见 `doc/context/team-division.md`）：A 负责全部前端 + 公开读接口 #30/#31/#32 + 契约与合并审核；B～H 全部做后端（B 骨架认证与权限切面 + RBAC、C 文章、D 审核与批量、E 媒体与任务、F 分类标签、G 状态机与提交流程 + 用户管理、H common 与留痕 + 操作日志切面）；每人真实读写 ≥ 3 张表（v2.6：A6 B6 C9 D9 E5 F4 G7 H6）；本阶段不安排测试。
 
 **公开前台范围延伸：分类 / 标签导航与关键字搜索都放进公开列表 #30，不新增匿名接口。**
 理由：FR-AUTH-004 限定了匿名可访问入口，新增公开路径就要改这份清单；`with_facets` 与 `q` 只是 #30 的可选参数，匿名面不扩大。facets 只从已发布文章聚合且不带计数，不泄露未公开内容的存在。`q` 只匹配标题与摘要（SRS §3.2 排除全文检索），LIKE 不建索引、不缓存，与「完全不引入缓存」一致。
 否决：新增 `GET /api/public/categories`、`/tags`（扩大匿名入口）；前端从已加载列表累积分类标签（第一屏导航不完整）；正文全文检索（超出 SRS 范围且需索引）。
 
-**其它已定**：`user.role` 用单列枚举而非角色关联表（多对多会在数据层允许一个账号挂两个角色，与 BR-ROLE-001 直接冲突）；`author_id` 放组合索引首位（归属过滤是每个文章查询的必备条件）；后端按**功能域**分包而非三层（按层分包会让每次改动横跨四个目录）；`security` 不得反向依赖业务包；前端 `views/article` 与 `views/review` **不共享可写组件**（审核页根本没有正文编辑控件，这是 BR-007 的界面层结构性落实，不是目录洁癖）；"每篇取最近一条驳回/下架原因"用 MySQL 8 窗口函数 `ROW_NUMBER() OVER (PARTITION BY article_id ...)`，2 次查询不是 N+1，且子查询的 `article_id IN (...)` 必须用**已过滤、已分页**的当页 id（顺序反了会通过"返回了不属于我的文章的原因"泄露他人内容）。
+**其它已定**：`user` 不设 email 字段（2026-11-23）；一人一角色用 `user.role_id` 外键而非 `user_role` 关联表（v2.6，D1；多对多会在数据层允许一个账号挂两个角色，与 BR-ROLE-001 直接冲突）；`author_id` 放组合索引首位（归属过滤是每个文章查询的必备条件）；后端按**功能域**分包而非三层（按层分包会让每次改动横跨四个目录）；`security` 不得反向依赖业务包；前端 `views/article` 与 `views/review` **不共享可写组件**（审核页根本没有正文编辑控件，这是 BR-007 的界面层结构性落实，不是目录洁癖）；"每篇取最近一条驳回/下架原因"用 MySQL 8 窗口函数 `ROW_NUMBER() OVER (PARTITION BY article_id ...)`，2 次查询不是 N+1，且子查询的 `article_id IN (...)` 必须用**已过滤、已分页**的当页 id（顺序反了会通过"返回了不属于我的文章的原因"泄露他人内容）。
 
 ### 规则层的承重墙（改这些要重新论证）
 
@@ -175,7 +212,7 @@
 - 本文件**不记提交号**：本仓库历史会被变基／改写（2026-10-10 一次 `amend` 就把已写下的哈希作废了），哈希留不住，记了反而变成悬空引用。
 - 历史里那条 `Revert "create project"` 是事故残留，**不是有人故意清空项目**。
 
-**文件清单**：`CMS-SRS.md`（根目录，**唯一主文档**）；`AGENTS.md`；`doc/api/`（api-spec + openapi）；`doc/context/` 下 4 份（project-overview / architecture / progress-tracker / git-standards）；`doc/design/traceability-check.py`（已暂停使用）；`doc/reference/chatgpt-srs-conversation.md`（**缺失**）。
+**文件清单**：`CMS-SRS.md`（根目录，**唯一主文档**）；`AGENTS.md`；`doc/api/`（api-spec + openapi）；`doc/context/` 下 5 份（project-overview / architecture / progress-tracker / git-standards / team-division）；`doc/db/`（schema + schema-reference.sql）；`doc/ai-log/`（AI 过程记录）；`doc/design/README.md`（设计图清单）；`doc/design/traceability-check.py`（已暂停使用）；`doc/reference/chatgpt-srs-conversation.md`（**缺失**）。
 已删除、不要再引用：`doc/requirements/*.md`、`doc/design/database-design.md`。
 
 **仍未恢复**：`doc/reference/chatgpt-srs-conversation.md`（需求原始输入归档，18 轮）。多个文档仍引用它，但它从未出现在任何一次提交历史里。它是"这条规则当初为什么这么定"的最终依据——缺了它，后续任何规则复核都只能靠现有文档自证，而现有文档自证恰恰是今天两处缺口得以长期存在的条件。**用户已表示暂不处理。**
