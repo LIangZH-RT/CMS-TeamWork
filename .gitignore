@@ -6,6 +6,10 @@ target/
 
 .claude/
 .doc/design/
+.doc/report/
+.doc/ai-log/
+.doc/db/
+
 
 ### IntelliJ IDEA ###
 .idea/modules.xml
