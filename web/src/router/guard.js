@@ -21,8 +21,19 @@ export function resolveBackofficeAccess(to, user, router) {
   if (!user) return { path: '/login', query: { redirect: to.fullPath } }
   // 3. /admin → 按角色跳到各自首页；没有可去的页面（含未知角色）→ 统一 404
   if (to.name === 'admin-home') return homeRouteFor(user.role, router) ?? notFoundFor(to)
-  // 4. 取最深一层声明了 meta.roles 的记录；角色不在其中，或子路由忘了声明 → 统一 404
+  // 4. 取最深一层声明了 meta.roles 的记录。
+  //    当前用户带 permissions 且路由声明了 meta.permission 时按权限点过滤（FR-AUTH-005）；
+  //    否则退回角色，避免没有权限数组的调用方被误拒。守卫只做体验。
   const record = [...to.matched].reverse().find((r) => Array.isArray(r.meta?.roles))
-  if (!record || !record.meta.roles.includes(user.role)) return notFoundFor(to)
+  if (!record || !allows(record, user)) return notFoundFor(to)
   return true
+}
+
+function allows(record, user) {
+  const need = record.meta?.permission
+  if (need && Array.isArray(user?.permissions)) {
+    const list = Array.isArray(need) ? need : [need]
+    return list.some((code) => user.permissions.includes(code))
+  }
+  return Array.isArray(record.meta?.roles) && record.meta.roles.includes(user.role)
 }

@@ -95,8 +95,18 @@ export function listPublished(sp) {
   if ([...q].length > Q_MAX) return badRequest('q', `不能超过 ${Q_MAX} 个字符`)
   const wf = sp.get('with_facets')
   if (wf !== null && wf !== 'true' && wf !== 'false') return badRequest('with_facets', '只接受 true / false')
+  const sorts = sp.getAll('sort').filter((s) => s !== '')
+  let sortDir = null
+  for (const item of sorts) {
+    const [field, dir] = item.split(',')
+    if (field !== 'published_at' || (dir !== 'asc' && dir !== 'desc')) {
+      return { status: 400, headers: { 'Content-Type': 'application/json; charset=utf-8' }, body: JSON.stringify({ code: 40018, message: '排序字段不合法', data: null }) }
+    }
+    sortDir = dir
+  }
 
   let rows = published()
+  if (sortDir === 'asc') rows = rows.slice().sort((x, y) => Date.parse(x.published_at) - Date.parse(y.published_at) || x.id - y.id)
   if (cat) rows = rows.filter((a) => a.category_id === Number(cat))
   for (const t of new Set(tagIds.map(Number))) rows = rows.filter((a) => a.tag_ids.includes(t))
   if (q) {
@@ -170,6 +180,19 @@ export function handle(method, rawUrl, headers = {}) {
   if (path === '/api/public/articles') return listPublished(url.searchParams)
   let m = /^\/api\/public\/articles\/([^/]+)$/.exec(path)
   if (m) return getPublished(decodeURIComponent(m[1]))
+  m = /^\/api\/media\/([^/]+)\/download$/.exec(path)
+  if (m) {
+    const file = getMedia(decodeURIComponent(m[1]), headers.range)
+    if (file.status !== 200 && file.status !== 206) return file
+    const name = `media-${m[1]}`
+    return {
+      ...file,
+      headers: {
+        ...file.headers,
+        'Content-Disposition': `attachment; filename="${name}"`,
+      },
+    }
+  }
   m = /^\/api\/media\/([^/]+)$/.exec(path)
   if (m) return getMedia(decodeURIComponent(m[1]), headers.range)
   return notFound()

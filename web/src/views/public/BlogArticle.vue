@@ -95,6 +95,7 @@ const tagLink = (t) => ({ name: 'blog-home', query: { tag_ids: [String(t.id)] } 
         <b>收听本文</b>
         <audio v-if="!audioBroken" controls preload="metadata" :src="article.audio_url" @error="audioBroken = true" />
         <span v-else class="muted">音频暂不可用</span>
+        <a class="dl" :href="`${article.audio_url}/download`">下载</a>
       </section>
 
       <MarkdownView :content="article.content" id="public-article" />

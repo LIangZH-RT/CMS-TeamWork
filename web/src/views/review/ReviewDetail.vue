@@ -135,8 +135,8 @@ async function doReject() {
           <span>文章正文只读，不能编辑。审核通过后：未设预定时间立即发布，预定时间在未来则进入待发布。</span>
         </div>
         <div class="action-buttons">
-          <el-button type="danger" @click="openReject">驳回</el-button>
-          <el-button type="success" @click="doApprove">审核通过</el-button>
+          <el-button v-permission="'review:reject'" type="danger" @click="openReject">驳回</el-button>
+          <el-button v-permission="'review:approve'" type="success" @click="doApprove">审核通过</el-button>
         </div>
       </div>
 

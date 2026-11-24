@@ -29,21 +29,26 @@ const routes = [
       { path: '', name: 'admin-home', component: { render: () => null }, meta: { roles: BOTH } },
 
       // ── 管理员端与共用页面（G）
-      { path: 'reviews', name: 'admin-reviews', component: () => import('@/views/review/ReviewQueue.vue'), meta: { title: '审核队列', roles: ADMIN } },
-      { path: 'reviews/:id', name: 'admin-review-detail', component: () => import('@/views/review/ReviewDetail.vue'), meta: { title: '审核详情', roles: ADMIN, menu: 'admin-reviews' } },
-      { path: 'articles', name: 'admin-articles', component: () => import('@/views/review/ArticleList.vue'), meta: { title: '全部文章', roles: ADMIN } },
-      { path: 'articles/:id', name: 'admin-article-detail', component: () => import('@/views/review/ArticleDetail.vue'), meta: { title: '文章详情', roles: ADMIN, menu: 'admin-articles' } },
-      // 留痕只读、两个角色共用（#19：归属编辑、管理员；归属由服务端判定）
-      { path: 'articles/:id/audit-logs', name: 'admin-audit-logs', component: () => import('@/views/article/AuditLogs.vue'), meta: { title: '留痕', roles: BOTH, menu: 'admin-articles' } },
-      { path: 'categories', name: 'admin-categories', component: () => import('@/views/taxonomy/CategoryManage.vue'), meta: { title: '分类管理', roles: ADMIN } },
-      // 标签对编辑开放（SRS FR-TAX-002，#24–#27）
-      { path: 'tags', name: 'admin-tags', component: () => import('@/views/taxonomy/TagManage.vue'), meta: { title: '标签管理', roles: BOTH } },
+      { path: 'reviews', name: 'admin-reviews', component: () => import('@/views/review/ReviewQueue.vue'), meta: { title: '审核队列', roles: ADMIN, permission: 'review:queue' } },
+      { path: 'reviews/:id', name: 'admin-review-detail', component: () => import('@/views/review/ReviewDetail.vue'), meta: { title: '审核详情', roles: ADMIN, permission: 'review:queue', menu: 'admin-reviews' } },
+      { path: 'articles', name: 'admin-articles', component: () => import('@/views/review/ArticleList.vue'), meta: { title: '全部文章', roles: ADMIN, permission: 'article:read:all' } },
+      { path: 'articles/:id', name: 'admin-article-detail', component: () => import('@/views/review/ArticleDetail.vue'), meta: { title: '文章详情', roles: ADMIN, permission: 'article:read:all', menu: 'admin-articles' } },
+      { path: 'articles/:id/audit-logs', name: 'admin-audit-logs', component: () => import('@/views/article/AuditLogs.vue'), meta: { title: '留痕', roles: BOTH, permission: 'audit:read', menu: 'admin-articles' } },
+      { path: 'categories', name: 'admin-categories', component: () => import('@/views/taxonomy/CategoryManage.vue'), meta: { title: '分类管理', roles: ADMIN, permission: 'category:update' } },
+      { path: 'tags', name: 'admin-tags', component: () => import('@/views/taxonomy/TagManage.vue'), meta: { title: '标签管理', roles: BOTH, permission: 'tag:read' } },
+      { path: 'users', name: 'admin-users', component: () => import('@/views/system/UserManage.vue'), meta: { title: '用户管理', roles: ADMIN, permission: 'user:read' } },
+      { path: 'roles', name: 'admin-roles', component: () => import('@/views/system/RolePermissions.vue'), meta: { title: '角色与权限', roles: ADMIN, permission: 'role:read' } },
+      { path: 'operation-logs', name: 'admin-oplogs', component: () => import('@/views/system/OperationLogs.vue'), meta: { title: '操作日志', roles: ADMIN, permission: 'oplog:read' } },
+      { path: 'profile', name: 'admin-profile', component: () => import('@/views/system/Profile.vue'), meta: { title: '个人资料', roles: BOTH } },
 
-      // ── 编辑端（F）
-      // my-articles、my-articles/new、my-articles/:id、my-articles/:id/edit，meta.roles: ['EDITOR']
-      // 路由名与 utils/menu.js 的 MENU 一致（admin-my-articles、admin-article-new），注册后菜单自动出现
+      { path: 'my-articles', name: 'admin-my-articles', component: () => import('@/views/article/MyArticles.vue'), meta: { title: '我的文章', roles: ['EDITOR'], permission: 'article:create' } },
+      { path: 'my-articles/new', name: 'admin-article-new', component: () => import('@/views/article/ArticleEdit.vue'), meta: { title: '写文章', roles: ['EDITOR'], permission: 'article:create', menu: 'admin-article-new' } },
+      { path: 'my-articles/:id/edit', name: 'admin-article-edit', component: () => import('@/views/article/ArticleEdit.vue'), meta: { title: '编辑文章', roles: ['EDITOR'], permission: 'article:update', menu: 'admin-my-articles' } },
+      { path: 'my-articles/:id', name: 'admin-my-article', component: () => import('@/views/article/ArticleMine.vue'), meta: { title: '文章详情', roles: ['EDITOR'], permission: 'article:create', menu: 'admin-my-articles' } },
     ],
   },
+  { path: '/login', name: 'login', component: () => import('@/views/auth/Login.vue'), meta: { title: '登录' } },
+  { path: '/register', name: 'register', component: () => import('@/views/auth/Register.vue'), meta: { title: '注册' } },
   {
     path: '/',
     component: PublicLayout,
@@ -56,7 +61,8 @@ const routes = [
         beforeEnter: (to) => {
           const raw = Array.isArray(to.query.category_id) ? to.query.category_id[0] : to.query.category_id
           if (raw == null) return true
-          const { category_id, ...query } = to.query
+          const query = { ...to.query }
+          delete query.category_id
           return isId(raw) ? { name: 'blog-category', params: { id: raw }, query } : { name: 'blog-home', query }
         },
       },

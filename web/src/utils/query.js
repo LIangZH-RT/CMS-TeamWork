@@ -16,12 +16,19 @@ export function parseListQuery(q = {}) {
   return { page, category_id, tag_ids }
 }
 
+/** 公开列表排序：默认发布时间降序，只把升序写进 URL（#30 白名单 published_at） */
+export function parseSort(q = {}) {
+  const raw = Array.isArray(q.sort) ? q.sort[0] : q.sort
+  return raw === 'asc' ? 'asc' : 'desc'
+}
+
 /** 生成路由 query；默认值省略，保持 URL 干净 */
-export function toRouteQuery({ page = 1, category_id = null, tag_ids = [] }) {
+export function toRouteQuery({ page = 1, category_id = null, tag_ids = [], sort = 'desc' }) {
   const q = {}
   if (category_id) q.category_id = String(category_id)
   if (tag_ids.length) q.tag_ids = tag_ids.map(String)
   if (page > 1) q.page = String(page)
+  if (sort === 'asc') q.sort = 'asc'
   return q
 }
 
@@ -51,11 +58,11 @@ export function parseSearchQuery(q = {}) {
   return { q: normalizeKeyword(q.q), page, category_id: null, tag_ids }
 }
 
-export function toSearchRouteQuery({ q = '', page = 1, tag_ids = [] }) {
+export function toSearchRouteQuery({ q = '', page = 1, tag_ids = [], sort = 'desc' }) {
   const out = {}
   const kw = normalizeKeyword(q)
   if (kw) out.q = kw
-  return { ...out, ...toRouteQuery({ page, category_id: null, tag_ids }) }
+  return { ...out, ...toRouteQuery({ page, category_id: null, tag_ids, sort }) }
 }
 
 /**

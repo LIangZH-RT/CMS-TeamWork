@@ -6,12 +6,13 @@ import { computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTaxonomy } from '@/stores/taxonomy'
 import { usePublicList } from '@/composables/usePublicList'
-import { isId, parseListQuery, toggleTag, toRouteQuery } from '@/utils/query'
+import { isId, parseListQuery, parseSort, toggleTag, toRouteQuery } from '@/utils/query'
 import ArticleGrid from '@/components/ArticleGrid.vue'
 import ActiveTagFilters from '@/components/ActiveTagFilters.vue'
 import CategoryPills from '@/components/CategoryPills.vue'
 import TagFilterPanel from '@/components/TagFilterPanel.vue'
 import AboutCard from '@/components/AboutCard.vue'
+import PublishSort from '@/components/PublishSort.vue'
 import NotFound from '@/views/public/NotFound.vue'
 
 const route = useRoute()
@@ -24,7 +25,7 @@ const category = computed(() => taxonomy.categoryById(id.value))
 const notFound = computed(() => !isId(id.value) || (taxonomy.status === 'ready' && !category.value))
 const filter = computed(() => {
   const { page, tag_ids } = parseListQuery(route.query)
-  return { page, category_id: id.value, tag_ids }
+  return { page, category_id: id.value, tag_ids, sort: parseSort(route.query) }
 })
 // 先等 facets 有结论（成功或失败）再请求列表，未知分类不会多发一次列表请求
 const decided = computed(() => taxonomy.status === 'ready' || taxonomy.status === 'error')
@@ -45,6 +46,7 @@ const pickCategory = (c) => router.push({ name: 'blog-category', params: { id: S
 const onToggleTag = (t) => go(toggleTag(filter.value, t.id))
 const clearTags = () => go({ ...filter.value, page: 1, tag_ids: [] })
 const onPage = (p) => go({ ...filter.value, page: p })
+const onSort = (sort) => go({ ...filter.value, page: 1, sort })
 </script>
 
 <template>
@@ -59,6 +61,7 @@ const onPage = (p) => go({ ...filter.value, page: p })
     <div class="body">
       <div class="list">
         <CategoryPills :active="id" />
+        <PublishSort :sort="filter.sort" @change="onSort" />
         <ActiveTagFilters :tag-ids="filter.tag_ids" :total="state === 'ready' ? result.total : null" @toggle="onToggleTag" @clear="clearTags" />
         <ArticleGrid
           :state="state"

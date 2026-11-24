@@ -5,14 +5,14 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from '@/stores/auth'
-import { ROLE_LABEL, isMenuActive, menuFor } from '@/utils/menu'
+import { ROLE_LABEL, isMenuActive, menuForUser } from '@/utils/menu'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuth()
 
 const role = computed(() => auth.user?.role)
-const nav = computed(() => menuFor(role.value, router))
+const nav = computed(() => menuForUser(auth.user, router))
 const roleLabel = computed(() => ROLE_LABEL[role.value] || '')
 
 // 退出：调 POST /api/auth/logout（#4），由 auth store 清状态，再回博客首页
@@ -48,7 +48,7 @@ async function onLogout() {
       <header class="topbar">
         <div class="crumbs">{{ $route.meta?.title || 'CMS 后台' }}</div>
         <div class="user">
-          <span class="u-name">{{ auth.user?.username || '加载中...' }}</span>
+          <router-link class="u-name" :to="{ name: 'admin-profile' }">{{ auth.user?.username || '加载中...' }}</router-link>
           <el-tag v-if="roleLabel" size="small" type="primary">{{ roleLabel }}</el-tag>
           <el-button size="small" text @click="onLogout">退出</el-button>
         </div>

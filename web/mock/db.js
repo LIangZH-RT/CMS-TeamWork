@@ -2,14 +2,18 @@
 // 故意带上状态、作者、驳回意见、预定时间等内部字段，用来验证接口层只输出 §8.2 白名单。
 // 分类 7「测试」、标签 15「Rust」只被未发布文章引用：facets 不应出现它们（api-spec §4.14 PublicFacets）。
 
+// 分类最多两级（BR-TAX-006）。parent_id / status 只给后台 #20；公开 facets 仍只用 id、name。
 export const categories = [
-  { id: 1, name: '后端' },
-  { id: 2, name: '前端' },
-  { id: 3, name: '数据库' },
-  { id: 4, name: '运维与云原生' },
-  { id: 5, name: '架构设计' },
-  { id: 6, name: 'AI 工程' },
-  { id: 7, name: '测试' },
+  { id: 1, name: '后端', parent_id: null, sort_order: 10, status: 'ENABLED' },
+  { id: 2, name: '前端', parent_id: null, sort_order: 20, status: 'ENABLED' },
+  { id: 3, name: '数据库', parent_id: null, sort_order: 30, status: 'ENABLED' },
+  { id: 4, name: '运维与云原生', parent_id: null, sort_order: 40, status: 'ENABLED' },
+  { id: 5, name: '架构设计', parent_id: null, sort_order: 50, status: 'ENABLED' },
+  { id: 6, name: 'AI 工程', parent_id: null, sort_order: 60, status: 'ENABLED' },
+  { id: 7, name: '测试', parent_id: null, sort_order: 70, status: 'ENABLED' },
+  { id: 16, name: 'Spring', parent_id: 1, sort_order: 10, status: 'ENABLED' },
+  { id: 17, name: '组件库', parent_id: 2, sort_order: 10, status: 'ENABLED' },
+  { id: 18, name: '停用示例', parent_id: null, sort_order: 90, status: 'DISABLED' },
 ]
 
 export const tags = [
@@ -162,6 +166,8 @@ export const authors = [
   { id: 13, username: 'wangwu', role: 'EDITOR' },
   { id: 14, username: 'zhaoliu', role: 'EDITOR' },
   { id: 15, username: 'sunqi', role: 'EDITOR' },
+  // 名下没有文章，可用于角色提升演示（BR-ROLE-005）
+  { id: 16, username: 'chenba', role: 'EDITOR' },
 ]
 
 // 审核标准：服务端配置项（api-spec §7.2；版本见 SRS §6.1.1，类别见 BR-CONTENT-005 / api-spec §4.1）

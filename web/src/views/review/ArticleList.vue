@@ -5,7 +5,9 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { listArticles } from '@/api/article'
-import { unpublishArticle } from '@/api/review'
+import { batchUnpublish, unpublishArticle } from '@/api/review'
+import BatchResultDialog from '@/components/BatchResultDialog.vue'
+import { explain } from '@/utils/errors'
 import { fmtDateTime } from '@/utils/format'
 import { ARTICLE_STATUS, ALL_STATUSES, STATUS_LABEL, STATUS_TAG_TYPE } from '@/utils/status'
 
@@ -13,7 +15,16 @@ const router = useRouter()
 const loading = ref(false)
 const rows = ref([])
 const total = ref(0)
-const query = reactive({ page: 1, page_size: 15, status: '', category_id: null, author_id: null, title: '' })
+const query = reactive({ page: 1, page_size: 15, status: '', category_id: null, author_id: null, keyword: '', sort: 'updated_at,desc' })
+const selected = ref([])
+const batchOpen = ref(false)
+const batchResult = ref(null)
+const sorts = [
+  { value: 'updated_at,desc', label: '最近更新' },
+  { value: 'created_at,desc', label: '最近创建' },
+  { value: 'published_at,desc', label: '最近发布' },
+  { value: 'title,asc', label: '标题' },
+]
 
 const tabList = computed(() => [
   { value: '', label: '全部' },
@@ -27,7 +38,7 @@ async function load() {
     rows.value = res.items
     total.value = res.total
   } catch (e) {
-    ElMessage.error(e?.message || '加载失败')
+    ElMessage.error(explain(e, '加载失败'))
   } finally {
     loading.value = false
   }
@@ -62,7 +73,25 @@ async function onUnpublish(row) {
       // STATE_CONFLICT：状态已被别人改变，刷新列表看最新状态
       ElMessage.error('文章状态已变更，无法下架')
       await load()
-    } else ElMessage.error(e?.message || '下架失败')
+    } else ElMessage.error(explain(e, '下架失败'))
+  }
+}
+
+async function onBatchUnpublish() {
+  const ids = selected.value.map((r) => r.id)
+  if (ids.length > 50) { ElMessage.warning('一次最多下架 50 篇'); return }
+  try {
+    const { value } = await ElMessageBox.prompt(`将下架 ${ids.length} 篇已发布文章，请填写统一原因。`, '批量下架', {
+      inputPattern: /\S+/,
+      inputErrorMessage: '下架原因不能为空',
+    })
+    batchResult.value = await batchUnpublish(ids, value.trim())
+    batchOpen.value = true
+    selected.value = []
+    await load()
+  } catch (e) {
+    if (e === 'cancel') return
+    ElMessage.error(explain(e, '批量下架失败'))
   }
 }
 </script>
@@ -74,13 +103,18 @@ async function onUnpublish(row) {
     </el-tabs>
 
     <div class="filters">
-      <el-input v-model="query.title" placeholder="按标题搜索" clearable style="width: 220px" @keyup.enter="onSearch" />
+      <el-input v-model="query.keyword" placeholder="标题或摘要" clearable style="width: 220px" @keyup.enter="onSearch" />
       <el-input v-model="query.author_id" placeholder="作者 ID" style="width: 140px" @keyup.enter="onSearch" />
+      <el-select v-model="query.sort" style="width: 140px" @change="onSearch">
+        <el-option v-for="s in sorts" :key="s.value" :label="s.label" :value="s.value" />
+      </el-select>
       <el-button type="primary" @click="onSearch">搜索</el-button>
-      <el-button @click="() => { query.title=''; query.author_id=null; onSearch() }">重置</el-button>
+      <el-button @click="() => { query.keyword=''; query.author_id=null; onSearch() }">重置</el-button>
+      <el-button v-permission="'review:unpublish'" type="danger" plain :disabled="!selected.length" @click="onBatchUnpublish">批量下架（{{ selected.length }}/50）</el-button>
     </div>
 
-    <el-table :data="rows" v-loading="loading" stripe style="margin-top: 16px">
+    <el-table :data="rows" v-loading="loading" stripe style="margin-top: 16px" row-key="id" @selection-change="(v) => selected = v">
+      <el-table-column type="selection" width="46" :selectable="(row) => row.status === ARTICLE_STATUS.PUBLISHED" />
       <el-table-column label="标题" min-width="260">
         <template #default="{ row }">
           <el-link type="primary" @click="goDetail(row)">{{ row.title }}</el-link>
@@ -102,7 +136,7 @@ async function onUnpublish(row) {
         <template #default="{ row }">
           <el-button text size="small" @click="goDetail(row)">详情</el-button>
           <el-button text size="small" @click="goAudit(row)">留痕</el-button>
-          <el-button text size="small" type="danger" :disabled="row.status !== ARTICLE_STATUS.PUBLISHED" @click="onUnpublish(row)">下架</el-button>
+          <el-button v-permission="'review:unpublish'" text size="small" type="danger" :disabled="row.status !== ARTICLE_STATUS.PUBLISHED" @click="onUnpublish(row)">下架</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -118,6 +152,7 @@ async function onUnpublish(row) {
         @current-change="load"
       />
     </div>
+    <BatchResultDialog v-model="batchOpen" :result="batchResult" />
   </div>
 </template>
 

@@ -67,8 +67,8 @@ describe('resolveBackofficeAccess：/admin 按角色重定向', () => {
     expect(access('/admin', ADMIN)).toEqual({ name: 'admin-reviews' })
   })
 
-  it('EDITOR：编辑端页面未注册时回退到菜单里第一个可进入的项（标签管理）', () => {
-    expect(access('/admin', EDITOR)).toEqual({ name: 'admin-tags' })
+  it('EDITOR：跳到我的文章', () => {
+    expect(access('/admin', EDITOR)).toEqual({ name: 'admin-my-articles' })
   })
 
   it('EDITOR：编辑端页面注册后跳到我的文章', () => {
